@@ -1,0 +1,17 @@
+# dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+
+# build artefacts
+dist/
+build/
+*.class
+
+# runtime output produced by sysinfo.sh
+sysinfo_report/
+
+# OS noise
+.DS_Store
+Thumbs.db
