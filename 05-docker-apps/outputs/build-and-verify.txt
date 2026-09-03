@@ -1,0 +1,52 @@
+=== docker images (the six Hello World images) ===
+REPOSITORY      TAG       IMAGE ID       SIZE
+hw-react-app    1.0       74a396dac33d   76.1MB
+hw-nginx-app    1.0       ecf42a77b16d   75.9MB
+hw-apache-app   1.0       815da8d98c29   105MB
+hw-java-app     1.0       21c1312a60c5   286MB
+hw-python-app   1.0       962e4a1cb50f   221MB
+hw-nodejs-app   1.0       eed9c28614e8   210MB
+
+=== docker ps (all six containers running) ===
+NAMES       IMAGE               STATUS              PORTS
+hw-nginx    hw-nginx-app:1.0    Up About a minute   0.0.0.0:9006->80/tcp, [::]:9006->80/tcp
+hw-react    hw-react-app:1.0    Up About a minute   0.0.0.0:9005->80/tcp, [::]:9005->80/tcp
+hw-apache   hw-apache-app:1.0   Up About a minute   0.0.0.0:9004->80/tcp, [::]:9004->80/tcp
+hw-java     hw-java-app:1.0     Up About a minute   0.0.0.0:9003->8080/tcp, [::]:9003->8080/tcp
+hw-python   hw-python-app:1.0   Up About a minute   0.0.0.0:9002->5000/tcp, [::]:9002->5000/tcp
+hw-nodejs   hw-nodejs-app:1.0   Up About a minute   0.0.0.0:9001->3000/tcp, [::]:9001->3000/tcp
+
+=== HTTP verification of every app ===
+Node.js   http://localhost:9001  -> HTTP 200
+Python    http://localhost:9002  -> HTTP 200
+Java      http://localhost:9003  -> HTTP 200
+Apache    http://localhost:9004  -> HTTP 200
+React     http://localhost:9005  -> HTTP 200
+Nginx     http://localhost:9006  -> HTTP 200
+
+=== curl output proving 'Hello World' is served ===
+--- Node.js (port 9001) ---
+<head><meta charset="utf-8"><title>Node.js Hello World</title>
+<h1>Hello World</h1>
+--- Python (port 9002) ---
+<head><meta charset="utf-8"><title>Python Hello World</title>
+<h1>Hello World</h1>
+--- Java (port 9003) ---
+<head><meta charset="utf-8"><title>Java Hello World</title>
+<h1>Hello World</h1>
+--- Apache (port 9004) ---
+<title>Apache Hello World</title>
+<h1>Hello World</h1>
+--- Nginx (port 9006) ---
+<title>Nginx Hello World</title>
+<h1>Hello World</h1>
+--- React (port 9005): renders client-side, so the h1 is in the JS bundle ---
+<title>React Hello World</title>
+<div id="root"></div>
+
+=== /health endpoints ===
+{"status":"ok","app":"nodejs"}
+{"app":"python","status":"ok"}
+
+{"status":"ok","app":"java"}
+{"status":"ok","app":"nginx"}

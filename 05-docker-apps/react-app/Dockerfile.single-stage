@@ -1,0 +1,10 @@
+# SINGLE-STAGE React build (for size comparison only) - ships node_modules,
+# the Vite toolchain and a full Node runtime just to serve static files.
+FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+RUN npm run build
+EXPOSE 4173
+CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0"]
