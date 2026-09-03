@@ -1,0 +1,308 @@
+###############################################
+# STEP 0: What is journalctl?
+###############################################
+$ systemctl --version | head -1
+systemd 255 (255.4-1ubuntu8.17)
+
+$ systemctl status systemd-journald --no-pager | head -12
+● systemd-journald.service - Journal Service
+     Loaded: loaded (/usr/lib/systemd/system/systemd-journald.service; static)
+    Drop-In: /usr/lib/systemd/system/systemd-journald.service.d
+             └─nice.conf
+     Active: active (running) since Thu 2026-09-03 04:19:48 UTC; 6min ago
+TriggeredBy: ○ systemd-journald-audit.socket
+             ● systemd-journald.socket
+             ● systemd-journald-dev-log.socket
+       Docs: man:systemd-journald.service(8)
+             man:journald.conf(5)
+   Main PID: 23 (systemd-journal)
+     Status: "Processing requests..."
+
+--- The journal is a BINARY log database written by systemd-journald. ---
+--- journalctl is the tool used to QUERY it.  Files live here: ---
+$ ls -la /var/log/journal/ 2>/dev/null || ls -la /run/log/journal/
+total 20
+drwxr-sr-x+ 1 root systemd-journal 4096 Sep  3 04:19 .
+drwxr-xr-x  1 root root            4096 Sep  3 04:19 ..
+drwxr-sr-x+ 2 root systemd-journal 4096 Sep  3 04:19 34c36af29c1e4f109f8240a2fdc99503
+
+###############################################
+# STEP 1: View ALL logs (newest at the bottom)
+###############################################
+$ journalctl --no-pager | head -20
+Sep 03 04:19:48 ff4c4be986b8 kernel: Booting Linux on physical CPU 0x0000000000 [0x610f0000]
+Sep 03 04:19:48 ff4c4be986b8 kernel: Linux version 7.0.12-linuxkit (root@buildkitsandbox) (gcc (Alpine 15.2.0) 15.2.0, GNU ld (GNU Binutils) 2.45.1) #1 SMP PREEMPT Wed Aug 12 20:18:49 UTC 2026 ()
+Sep 03 04:19:48 ff4c4be986b8 kernel: OF: reserved mem: Reserved memory: No reserved-memory node in the DT
+Sep 03 04:19:48 ff4c4be986b8 kernel: psci: probing for conduit method from DT.
+Sep 03 04:19:48 ff4c4be986b8 kernel: psci: PSCIv1.1 detected in firmware.
+Sep 03 04:19:48 ff4c4be986b8 kernel: psci: Using standard PSCI v0.2 function IDs
+Sep 03 04:19:48 ff4c4be986b8 kernel: psci: Trusted OS migration not required
+Sep 03 04:19:48 ff4c4be986b8 kernel: psci: SMC Calling Convention v1.1
+Sep 03 04:19:48 ff4c4be986b8 kernel: Zone ranges:
+Sep 03 04:19:48 ff4c4be986b8 kernel:   DMA      [mem 0x0000000070000000-0x00000000ffffffff]
+Sep 03 04:19:48 ff4c4be986b8 kernel:   DMA32    empty
+Sep 03 04:19:48 ff4c4be986b8 kernel:   Normal   [mem 0x0000000100000000-0x000000016fffffff]
+Sep 03 04:19:48 ff4c4be986b8 kernel: Movable zone start for each node
+Sep 03 04:19:48 ff4c4be986b8 kernel: Early memory node ranges
+Sep 03 04:19:48 ff4c4be986b8 kernel:   node   0: [mem 0x0000000070000000-0x000000016fffffff]
+Sep 03 04:19:48 ff4c4be986b8 kernel: Initmem setup node 0 [mem 0x0000000070000000-0x000000016fffffff]
+Sep 03 04:19:48 ff4c4be986b8 kernel: percpu: Embedded 32 pages/cpu s90648 r8192 d32232 u131072
+Sep 03 04:19:48 ff4c4be986b8 kernel: pcpu-alloc: s90648 r8192 d32232 u131072 alloc=32*4096
+Sep 03 04:19:48 ff4c4be986b8 kernel: pcpu-alloc: [0] 0 [0] 1 [0] 2 [0] 3 [0] 4 [0] 5 [0] 6 [0] 7 
+Sep 03 04:19:48 ff4c4be986b8 kernel: Detected PIPT I-cache on CPU0
+
+###############################################
+# STEP 2: Most useful flags
+###############################################
+--- -n N : last N lines ---
+$ journalctl -n 10 --no-pager
+Sep 03 04:26:06 ff4c4be986b8 deluser[1013]: `/usr/bin/crontab' not executed. Skipping crontab removal. Package `cron' required.
+Sep 03 04:26:06 ff4c4be986b8 deluser[1013]: Removing user `raw_user' ...
+Sep 03 04:26:06 ff4c4be986b8 userdel[1017]: delete user 'raw_user'
+Sep 03 04:26:06 ff4c4be986b8 userdel[1017]: removed group 'raw_user' owned by 'raw_user'
+Sep 03 04:26:06 ff4c4be986b8 userdel[1017]: removed shadow group 'raw_user' owned by 'raw_user'
+Sep 03 04:26:06 ff4c4be986b8 userdel[1025]: delete user 'flag_user'
+Sep 03 04:26:06 ff4c4be986b8 userdel[1025]: delete 'flag_user' from group 'sudo'
+Sep 03 04:26:06 ff4c4be986b8 userdel[1025]: removed group 'flag_user' owned by 'flag_user'
+Sep 03 04:26:06 ff4c4be986b8 userdel[1025]: removed shadow group 'flag_user' owned by 'flag_user'
+Sep 03 04:26:06 ff4c4be986b8 userdel[1025]: delete 'flag_user' from shadow group 'sudo'
+
+--- -r : reverse (newest first) ---
+$ journalctl -r -n 5 --no-pager
+Sep 03 04:26:06 ff4c4be986b8 userdel[1025]: delete 'flag_user' from shadow group 'sudo'
+Sep 03 04:26:06 ff4c4be986b8 userdel[1025]: removed shadow group 'flag_user' owned by 'flag_user'
+Sep 03 04:26:06 ff4c4be986b8 userdel[1025]: removed group 'flag_user' owned by 'flag_user'
+Sep 03 04:26:06 ff4c4be986b8 userdel[1025]: delete 'flag_user' from group 'sudo'
+Sep 03 04:26:06 ff4c4be986b8 userdel[1025]: delete user 'flag_user'
+
+--- -e : jump to the end   |   -f : follow live (like tail -f) ---
+--- -x : add explanatory help text to messages ---
+$ journalctl -xn 5 --no-pager
+Sep 03 04:26:06 ff4c4be986b8 userdel[1025]: delete user 'flag_user'
+Sep 03 04:26:06 ff4c4be986b8 userdel[1025]: delete 'flag_user' from group 'sudo'
+Sep 03 04:26:06 ff4c4be986b8 userdel[1025]: removed group 'flag_user' owned by 'flag_user'
+Sep 03 04:26:06 ff4c4be986b8 userdel[1025]: removed shadow group 'flag_user' owned by 'flag_user'
+Sep 03 04:26:06 ff4c4be986b8 userdel[1025]: delete 'flag_user' from shadow group 'sudo'
+
+###############################################
+# STEP 3: Logs for a SPECIFIC SERVICE  (-u)
+###############################################
+$ systemctl start nginx
+
+$ systemctl status nginx --no-pager | head -12
+● nginx.service - A high performance web server and a reverse proxy server
+     Loaded: loaded (/usr/lib/systemd/system/nginx.service; enabled; preset: enabled)
+     Active: active (running) since Thu 2026-09-03 04:19:48 UTC; 6min ago
+       Docs: man:nginx(8)
+    Process: 73 ExecStartPre=/usr/sbin/nginx -t -q -g daemon on; master_process on; (code=exited, status=0/SUCCESS)
+    Process: 78 ExecStart=/usr/sbin/nginx -g daemon on; master_process on; (code=exited, status=0/SUCCESS)
+   Main PID: 81 (nginx)
+      Tasks: 9 (limit: 4742)
+     Memory: 5.4M (peak: 6.2M)
+        CPU: 22ms
+     CGroup: /docker/ff4c4be986b899c0c185ef292b8cb93cf30c8f3c0686698330d96955b1b68228/system.slice/nginx.service
+             ├─81 "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;"
+
+--- THE key command: journalctl -u <service> ---
+$ journalctl -u nginx --no-pager
+Sep 03 04:19:48 ff4c4be986b8 systemd[1]: Starting nginx.service - A high performance web server and a reverse proxy server...
+Sep 03 04:19:48 ff4c4be986b8 systemd[1]: Started nginx.service - A high performance web server and a reverse proxy server.
+
+--- restart the service and watch new entries appear ---
+$ systemctl restart nginx
+
+$ journalctl -u nginx --no-pager -n 15
+Sep 03 04:19:48 ff4c4be986b8 systemd[1]: Starting nginx.service - A high performance web server and a reverse proxy server...
+Sep 03 04:19:48 ff4c4be986b8 systemd[1]: Started nginx.service - A high performance web server and a reverse proxy server.
+Sep 03 04:26:38 ff4c4be986b8 systemd[1]: Stopping nginx.service - A high performance web server and a reverse proxy server...
+Sep 03 04:26:38 ff4c4be986b8 systemd[1]: nginx.service: Deactivated successfully.
+Sep 03 04:26:38 ff4c4be986b8 systemd[1]: Stopped nginx.service - A high performance web server and a reverse proxy server.
+Sep 03 04:26:38 ff4c4be986b8 systemd[1]: Starting nginx.service - A high performance web server and a reverse proxy server...
+Sep 03 04:26:38 ff4c4be986b8 systemd[1]: Started nginx.service - A high performance web server and a reverse proxy server.
+
+###############################################
+# STEP 4: Filter by TIME
+###############################################
+$ journalctl --since '10 minutes ago' --no-pager | tail -8
+Sep 03 04:26:06 ff4c4be986b8 userdel[1025]: removed group 'flag_user' owned by 'flag_user'
+Sep 03 04:26:06 ff4c4be986b8 userdel[1025]: removed shadow group 'flag_user' owned by 'flag_user'
+Sep 03 04:26:06 ff4c4be986b8 userdel[1025]: delete 'flag_user' from shadow group 'sudo'
+Sep 03 04:26:38 ff4c4be986b8 systemd[1]: Stopping nginx.service - A high performance web server and a reverse proxy server...
+Sep 03 04:26:38 ff4c4be986b8 systemd[1]: nginx.service: Deactivated successfully.
+Sep 03 04:26:38 ff4c4be986b8 systemd[1]: Stopped nginx.service - A high performance web server and a reverse proxy server.
+Sep 03 04:26:38 ff4c4be986b8 systemd[1]: Starting nginx.service - A high performance web server and a reverse proxy server...
+Sep 03 04:26:38 ff4c4be986b8 systemd[1]: Started nginx.service - A high performance web server and a reverse proxy server.
+
+$ journalctl --since today --no-pager | wc -l
+826
+
+$ journalctl --since '2026-01-01' --until 'now' --no-pager | wc -l
+826
+
+--- also accepts: yesterday, '1 hour ago', '2026-09-03 04:00:00' ---
+###############################################
+# STEP 5: Filter by PRIORITY  (-p)
+###############################################
+levels: 0 emerg  1 alert  2 crit  3 err  4 warning  5 notice  6 info  7 debug
+$ journalctl -p err --no-pager -n 10
+Sep 03 04:20:59 ff4c4be986b8 deluser[282]: In order to use the --remove-home, --remove-all-files, and --backup features, you need to install the `perl' package. To accomplish that, run apt-get install perl.
+Sep 03 04:21:26 ff4c4be986b8 deluser[300]: In order to use the --remove-home, --remove-all-files, and --backup features, you need to install the `perl' package. To accomplish that, run apt-get install perl.
+Sep 03 04:21:26 ff4c4be986b8 adduser[309]: The user `testuser' already exists.
+Sep 03 04:21:33 ff4c4be986b8 deluser[327]: In order to use the --remove-home, --remove-all-files, and --backup features, you need to install the `perl' package. To accomplish that, run apt-get install perl.
+Sep 03 04:25:50 ff4c4be986b8 adduser[805]: Caught a SIG%s.
+Sep 03 04:25:50 ff4c4be986b8 adduser[805]: `groupdel testuser' returned error code 6. Exiting.
+
+$ journalctl -p warning..err --no-pager -n 10
+Sep 03 04:19:48 ff4c4be986b8 kernel: pci-host-generic 40000000.pci: Memory resource size exceeds max for 32 bits
+Sep 03 04:19:48 ff4c4be986b8 kernel: PFKEY is deprecated and scheduled to be removed in 2027, please contact the netdev mailing list
+Sep 03 04:19:48 ff4c4be986b8 kernel: netlink: 'initd': attribute type 4 has an invalid length.
+Sep 03 04:19:48 ff4c4be986b8 kernel: fakeowner: loading out-of-tree module taints kernel.
+Sep 03 04:19:48 ff4c4be986b8 kernel: NOTICE: Automounting of tracing to debugfs is deprecated and will be removed in 2030
+Sep 03 04:19:48 ff4c4be986b8 kernel: hrtimer: interrupt took 5203209 ns
+Sep 03 04:19:48 ff4c4be986b8 systemd-sysctl[31]: Couldn't write '1' to 'kernel/yama/ptrace_scope', ignoring: No such file or directory
+Sep 03 04:23:13 ff4c4be986b8 deluser[705]: `/usr/bin/crontab' not executed. Skipping crontab removal. Package `cron' required.
+Sep 03 04:25:50 ff4c4be986b8 adduser[805]: Caught a SIG%s.
+Sep 03 04:26:06 ff4c4be986b8 deluser[1013]: `/usr/bin/crontab' not executed. Skipping crontab removal. Package `cron' required.
+
+###############################################
+# STEP 6: Filter by BOOT, by PID, by USER, by EXECUTABLE
+###############################################
+$ journalctl --list-boots --no-pager
+IDX BOOT ID                          FIRST ENTRY                 LAST ENTRY
+  0 3403a99c68564371b9fb72c149337f7a Thu 2026-09-03 04:19:48 UTC Thu 2026-09-03 04:26:38 UTC
+
+$ journalctl -b --no-pager | head -5
+Sep 03 04:19:48 ff4c4be986b8 kernel: Booting Linux on physical CPU 0x0000000000 [0x610f0000]
+Sep 03 04:19:48 ff4c4be986b8 kernel: Linux version 7.0.12-linuxkit (root@buildkitsandbox) (gcc (Alpine 15.2.0) 15.2.0, GNU ld (GNU Binutils) 2.45.1) #1 SMP PREEMPT Wed Aug 12 20:18:49 UTC 2026 ()
+Sep 03 04:19:48 ff4c4be986b8 kernel: OF: reserved mem: Reserved memory: No reserved-memory node in the DT
+Sep 03 04:19:48 ff4c4be986b8 kernel: psci: probing for conduit method from DT.
+Sep 03 04:19:48 ff4c4be986b8 kernel: psci: PSCIv1.1 detected in firmware.
+
+--- -b -1 would show the PREVIOUS boot ---
+$ journalctl _PID=1 --no-pager -n 5
+Sep 03 04:26:38 ff4c4be986b8 systemd[1]: Stopping nginx.service - A high performance web server and a reverse proxy server...
+Sep 03 04:26:38 ff4c4be986b8 systemd[1]: nginx.service: Deactivated successfully.
+Sep 03 04:26:38 ff4c4be986b8 systemd[1]: Stopped nginx.service - A high performance web server and a reverse proxy server.
+Sep 03 04:26:38 ff4c4be986b8 systemd[1]: Starting nginx.service - A high performance web server and a reverse proxy server...
+Sep 03 04:26:38 ff4c4be986b8 systemd[1]: Started nginx.service - A high performance web server and a reverse proxy server.
+
+$ journalctl /usr/sbin/nginx --no-pager -n 5
+-- No entries --
+
+$ journalctl -u nginx -o json-pretty --no-pager -n 1
+{
+	"JOB_RESULT" : "done",
+	"_BOOT_ID" : "3403a99c68564371b9fb72c149337f7a",
+	"TID" : "1",
+	"_SYSTEMD_CGROUP" : "/init.scope",
+	"CODE_FUNC" : "job_emit_done_message",
+	"UNIT" : "nginx.service",
+	"_UID" : "0",
+	"_GID" : "0",
+	"_RUNTIME_SCOPE" : "system",
+	"CODE_FILE" : "src/core/job.c",
+	"_PID" : "1",
+	"_SOURCE_REALTIME_TIMESTAMP" : "1788409598076258",
+	"__SEQNUM" : "1430",
+	"__CURSOR" : "s=2e741be98f9c405d9b6160539dfc87ed;i=596;b=3403a99c68564371b9fb72c149337f7a;m=56ea58ca1d;t=65a8c8ece6584;x=e899bfa4c1e147b6",
+	"_CAP_EFFECTIVE" : "1ffffffffff",
+	"__SEQNUM_ID" : "2e741be98f9c405d9b6160539dfc87ed",
+	"MESSAGE" : "Started nginx.service - A high performance web server and a reverse proxy server.",
+	"SYSLOG_IDENTIFIER" : "systemd",
+	"_COMM" : "systemd",
+	"_SYSTEMD_SLICE" : "-.slice",
+	"_TRANSPORT" : "journal",
+	"_MACHINE_ID" : "34c36af29c1e4f109f8240a2fdc99503",
+	"PRIORITY" : "6",
+	"MESSAGE_ID" : "39f53479d3a045ac8e11786248231fbf",
+	"_SYSTEMD_UNIT" : "init.scope",
+	"CODE_LINE" : "796",
+	"__REALTIME_TIMESTAMP" : "1788409598076292",
+	"SYSLOG_FACILITY" : "3",
+	"_CMDLINE" : "/sbin/init",
+	"INVOCATION_ID" : "90e7407c7a3e4c22b2096ab51fcf2bd8",
+	"__MONOTONIC_TIMESTAMP" : "373298874909",
+	"_HOSTNAME" : "ff4c4be986b8",
+	"JOB_ID" : "150",
+	"_EXE" : "/usr/lib/systemd/systemd",
+	"JOB_TYPE" : "start"
+}
+
+###############################################
+# STEP 7: Output formats  (-o)
+###############################################
+$ journalctl -u nginx -o short --no-pager -n 2
+Sep 03 04:26:38 ff4c4be986b8 systemd[1]: Starting nginx.service - A high performance web server and a reverse proxy server...
+Sep 03 04:26:38 ff4c4be986b8 systemd[1]: Started nginx.service - A high performance web server and a reverse proxy server.
+
+$ journalctl -u nginx -o cat --no-pager -n 3
+Stopped nginx.service - A high performance web server and a reverse proxy server.
+Starting nginx.service - A high performance web server and a reverse proxy server...
+Started nginx.service - A high performance web server and a reverse proxy server.
+
+$ journalctl -u nginx -o verbose --no-pager -n 1
+Thu 2026-09-03 04:26:38.076258 UTC [s=2e741be98f9c405d9b6160539dfc87ed;i=596;b=3403a99c68564371b9fb72c149337f7a;m=56ea58ca1d;t=65a8c8ece6584;x=e899bfa4c1e147b6]
+    PRIORITY=6
+    _BOOT_ID=3403a99c68564371b9fb72c149337f7a
+    _MACHINE_ID=34c36af29c1e4f109f8240a2fdc99503
+    _HOSTNAME=ff4c4be986b8
+    _RUNTIME_SCOPE=system
+    _UID=0
+    _GID=0
+    SYSLOG_FACILITY=3
+    _TRANSPORT=journal
+    TID=1
+    CODE_FILE=src/core/job.c
+    SYSLOG_IDENTIFIER=systemd
+    JOB_TYPE=start
+    _PID=1
+    _COMM=systemd
+    _EXE=/usr/lib/systemd/systemd
+    _CMDLINE=/sbin/init
+    _CAP_EFFECTIVE=1ffffffffff
+    _SYSTEMD_CGROUP=/init.scope
+    _SYSTEMD_UNIT=init.scope
+    _SYSTEMD_SLICE=-.slice
+    CODE_LINE=796
+    CODE_FUNC=job_emit_done_message
+    JOB_RESULT=done
+    MESSAGE_ID=39f53479d3a045ac8e11786248231fbf
+    UNIT=nginx.service
+    MESSAGE=Started nginx.service - A high performance web server and a reverse proxy server.
+    JOB_ID=150
+    INVOCATION_ID=90e7407c7a3e4c22b2096ab51fcf2bd8
+    _SOURCE_REALTIME_TIMESTAMP=1788409598076258
+
+###############################################
+# STEP 8: Kernel messages, and writing your own entry
+###############################################
+$ journalctl -k --no-pager -n 5
+Sep 03 04:19:48 ff4c4be986b8 kernel: eth0: renamed from vetha74d1df
+Sep 03 04:19:48 ff4c4be986b8 kernel: docker0: port 1(veth5f80646) entered blocking state
+Sep 03 04:19:48 ff4c4be986b8 kernel: docker0: port 1(veth5f80646) entered forwarding state
+Sep 03 04:19:48 ff4c4be986b8 systemd-journald[23]: Collecting audit messages is disabled.
+Sep 03 04:19:48 ff4c4be986b8 systemd-journald[23]: Received client request to flush runtime journal.
+
+$ logger -t devops-homework -p user.notice 'Hello from the DevOps homework, written via logger'
+
+$ journalctl -t devops-homework --no-pager
+Sep 03 04:26:38 ff4c4be986b8 devops-homework[1090]: Hello from the DevOps homework, written via logger
+
+###############################################
+# STEP 9: Disk usage and log rotation / cleanup
+###############################################
+$ journalctl --disk-usage
+Archived and active journals take up 8.0M in the file system.
+
+$ journalctl --verify 2>&1 | tail -3
+PASS: /var/log/journal/34c36af29c1e4f109f8240a2fdc99503/system.journal
+
+--- cleanup commands (destructive, shown here for reference): ---
+    journalctl --vacuum-size=100M    # keep at most 100 MB
+    journalctl --vacuum-time=7d      # keep only the last 7 days
+    journalctl --rotate              # force rotation right now
+$ journalctl --vacuum-time=2d
+Vacuuming done, freed 0B of archived journals from /run/log/journal.
+Vacuuming done, freed 0B of archived journals from /var/log/journal/34c36af29c1e4f109f8240a2fdc99503.
+Vacuuming done, freed 0B of archived journals from /var/log/journal.
+

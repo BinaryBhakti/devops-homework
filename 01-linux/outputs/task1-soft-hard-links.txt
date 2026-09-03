@@ -1,0 +1,204 @@
+###############################################
+# STEP 1: Create an original file
+###############################################
+$ echo 'Hello from the original file' > original.txt
+
+$ cat original.txt
+Hello from the original file
+
+$ ls -li original.txt
+24742 -rw-r--r-- 1 root root 29 Sep  3 04:20 original.txt
+
+###############################################
+# STEP 2: Create a HARD link  (ln src link)
+###############################################
+$ ln original.txt hardlink.txt
+
+$ ls -li original.txt hardlink.txt
+24742 -rw-r--r-- 2 root root 29 Sep  3 04:20 hardlink.txt
+24742 -rw-r--r-- 2 root root 29 Sep  3 04:20 original.txt
+
+###############################################
+# STEP 3: Create a SOFT/SYMBOLIC link  (ln -s src link)
+###############################################
+$ ln -s original.txt softlink.txt
+
+$ ls -li original.txt hardlink.txt softlink.txt
+24742 -rw-r--r-- 2 root root 29 Sep  3 04:20 hardlink.txt
+24742 -rw-r--r-- 2 root root 29 Sep  3 04:20 original.txt
+24743 lrwxrwxrwx 1 root root 12 Sep  3 04:20 softlink.txt -> original.txt
+
+###############################################
+# STEP 4: Compare inode numbers and link counts
+###############################################
+$ stat original.txt
+  File: original.txt
+  Size: 29        	Blocks: 8          IO Block: 4096   regular file
+Device: 0,56	Inode: 24742       Links: 2
+Access: (0644/-rw-r--r--)  Uid: (    0/    root)   Gid: (    0/    root)
+Access: 2026-09-03 04:20:21.999875001 +0000
+Modify: 2026-09-03 04:20:21.998875001 +0000
+Change: 2026-09-03 04:20:22.004875001 +0000
+ Birth: 2026-09-03 04:20:21.998875001 +0000
+
+$ stat hardlink.txt
+  File: hardlink.txt
+  Size: 29        	Blocks: 8          IO Block: 4096   regular file
+Device: 0,56	Inode: 24742       Links: 2
+Access: (0644/-rw-r--r--)  Uid: (    0/    root)   Gid: (    0/    root)
+Access: 2026-09-03 04:20:21.999875001 +0000
+Modify: 2026-09-03 04:20:21.998875001 +0000
+Change: 2026-09-03 04:20:22.004875001 +0000
+ Birth: 2026-09-03 04:20:21.998875001 +0000
+
+$ stat softlink.txt
+  File: softlink.txt -> original.txt
+  Size: 12        	Blocks: 0          IO Block: 4096   symbolic link
+Device: 0,56	Inode: 24743       Links: 1
+Access: (0777/lrwxrwxrwx)  Uid: (    0/    root)   Gid: (    0/    root)
+Access: 2026-09-03 04:20:22.008875001 +0000
+Modify: 2026-09-03 04:20:22.007875001 +0000
+Change: 2026-09-03 04:20:22.007875001 +0000
+ Birth: 2026-09-03 04:20:22.007875001 +0000
+
+###############################################
+# STEP 5: Both links read the same content
+###############################################
+$ cat hardlink.txt
+Hello from the original file
+
+$ cat softlink.txt
+Hello from the original file
+
+###############################################
+# STEP 6: Edit through the hard link -> all see it
+###############################################
+$ echo 'Line added through the HARD link' >> hardlink.txt
+
+$ cat original.txt
+Hello from the original file
+Line added through the HARD link
+
+$ cat softlink.txt
+Hello from the original file
+Line added through the HARD link
+
+###############################################
+# STEP 7: THE KEY TEST -- delete the original file
+###############################################
+$ rm original.txt
+
+$ ls -li
+total 4
+24742 -rw-r--r-- 1 root root 62 Sep  3 04:20 hardlink.txt
+24743 lrwxrwxrwx 1 root root 12 Sep  3 04:20 softlink.txt -> original.txt
+
+--- Hard link still works (data survives, link count 2 -> 1): ---
+$ cat hardlink.txt
+Hello from the original file
+Line added through the HARD link
+
+--- Soft link is now BROKEN / dangling (points to a name that is gone): ---
+$ cat softlink.txt
+cat: softlink.txt: No such file or directory
+
+$ ls -l softlink.txt
+lrwxrwxrwx 1 root root 12 Sep  3 04:20 softlink.txt -> original.txt
+
+$ readlink softlink.txt
+original.txt
+
+$ test -e softlink.txt && echo 'target exists' || echo 'BROKEN LINK: target does not exist'
+BROKEN LINK: target does not exist
+
+$ file softlink.txt
+softlink.txt: broken symbolic link to original.txt
+
+###############################################
+# STEP 8: Restore the name -> soft link heals itself
+###############################################
+$ ln hardlink.txt original.txt
+
+$ cat softlink.txt
+Hello from the original file
+Line added through the HARD link
+
+###############################################
+# STEP 9: Hard links CANNOT cross filesystems or link directories
+###############################################
+$ mkdir mydir
+
+$ ln mydir dirhardlink
+ln: mydir: hard link not allowed for directory
+
+--- but a SOFT link to a directory is perfectly legal: ---
+$ ln -s mydir dirsoftlink
+
+$ ls -l dirsoftlink
+lrwxrwxrwx 1 root root 5 Sep  3 04:20 dirsoftlink -> mydir
+
+$ ls -ld dirsoftlink/
+drwxr-xr-x 2 root root 4096 Sep  3 04:20 dirsoftlink/
+
+###############################################
+# STEP 10: Deleting links
+###############################################
+$ ls -li
+total 12
+24745 lrwxrwxrwx 1 root root    5 Sep  3 04:20 dirsoftlink -> mydir
+24742 -rw-r--r-- 2 root root   62 Sep  3 04:20 hardlink.txt
+24744 drwxr-xr-x 2 root root 4096 Sep  3 04:20 mydir
+24742 -rw-r--r-- 2 root root   62 Sep  3 04:20 original.txt
+24743 lrwxrwxrwx 1 root root   12 Sep  3 04:20 softlink.txt -> original.txt
+
+--- Remove a soft link with rm / unlink (NOT rm on the trailing slash) ---
+$ rm softlink.txt
+
+$ unlink dirsoftlink
+
+--- Remove a hard link: just rm it; data dies only when link count hits 0 ---
+$ ls -li
+total 12
+24742 -rw-r--r-- 2 root root   62 Sep  3 04:20 hardlink.txt
+24744 drwxr-xr-x 2 root root 4096 Sep  3 04:20 mydir
+24742 -rw-r--r-- 2 root root   62 Sep  3 04:20 original.txt
+
+$ rm hardlink.txt
+
+$ ls -li
+total 8
+24744 drwxr-xr-x 2 root root 4096 Sep  3 04:20 mydir
+24742 -rw-r--r-- 1 root root   62 Sep  3 04:20 original.txt
+
+$ cat original.txt
+Hello from the original file
+Line added through the HARD link
+
+--- Now delete the LAST hard link: the data is finally freed ---
+$ rm original.txt
+
+$ ls -li
+total 4
+24744 drwxr-xr-x 2 root root 4096 Sep  3 04:20 mydir
+
+###############################################
+# STEP 11: find broken symlinks / count hard links
+###############################################
+$ echo data > f1.txt; ln f1.txt f2.txt; ln f1.txt f3.txt
+
+$ ls -li f1.txt f2.txt f3.txt
+24742 -rw-r--r-- 3 root root 5 Sep  3 04:20 f1.txt
+24742 -rw-r--r-- 3 root root 5 Sep  3 04:20 f2.txt
+24742 -rw-r--r-- 3 root root 5 Sep  3 04:20 f3.txt
+
+$ stat -c '%n has %h hard links (inode %i)' f1.txt
+f1.txt has 3 hard links (inode 24742)
+
+$ find . -type l -xtype l
+
+$ ln -s /no/such/file broken.link
+
+--- find dangling symlinks: ---
+$ find . -xtype l
+./broken.link
+

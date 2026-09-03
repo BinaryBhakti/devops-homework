@@ -1,0 +1,20 @@
+# Ubuntu 24.04 lab container with systemd (PID 1) so that journalctl works.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV container=docker
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      systemd systemd-sysv dbus \
+      adduser passwd sudo \
+      nginx \
+      iproute2 iputils-ping net-tools dnsutils traceroute curl wget \
+      tree less vim nano procps file \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Trim units that are pointless inside a container
+RUN systemctl mask systemd-udevd systemd-udev-trigger systemd-modules-load \
+      systemd-firstboot systemd-resolved || true
+
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

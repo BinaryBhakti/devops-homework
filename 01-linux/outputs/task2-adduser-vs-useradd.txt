@@ -1,0 +1,219 @@
+###############################################
+# STEP 0: What ARE these two commands?
+###############################################
+$ cat /etc/os-release | head -3
+PRETTY_NAME="Ubuntu 24.04.4 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+
+$ which adduser useradd
+/usr/sbin/adduser
+/usr/sbin/useradd
+
+$ file /usr/sbin/adduser
+/usr/sbin/adduser: Perl script text executable
+
+$ file /usr/sbin/useradd
+/usr/sbin/useradd: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, BuildID[sha1]=483f79642f7a936acdeb2cb2fd1c4e70c2f0ef9d, for GNU/Linux 3.7.0, stripped
+
+--- adduser is a friendly Perl WRAPPER; useradd is the low-level C binary ---
+$ head -20 /usr/sbin/adduser
+#! /usr/bin/perl
+
+# Copyright (C) 2000-2004 Roland Bauerschmidt <rb@debian.org>
+#               2005-2023 Marc Haber <mh+debian-packages@zugschlus.de>
+#               2022 Benjamin Drung <benjamin.drung@canonical.com>
+#               2023 Guillem Jover <guillem@debian.org>
+#               2021-2022 Jason Franklin <jason@oneway.dev>
+#               2022 Matt Barry <matt@hazelmollusk.org>
+#               2016-2017 Afif Elghraoui <afif@debian.org>
+#               2016 Dr. Helge Kreutzmann <debian@helgefjell.de>
+#               2005-2009 Joerg Hoh <joerg@joerghoh.de>
+#               2006-2011 Stephen Gran <sgran@debian.org>
+#
+# Original adduser:
+# Copyright (C) 1997-1999 Guy Maor <maor@debian.org>
+#
+# Copyright (C) 1995 Ted Hajek <tedhajek@boombox.micro.umn.edu>
+#                    Ian A. Murdock <imurdock@gnu.ai.mit.edu>
+#
+# The general scheme of this program was adapted from the original
+
+###############################################
+# STEP 1: The LOW-LEVEL way -- useradd (bare minimum)
+###############################################
+$ useradd raw_user
+
+$ grep raw_user /etc/passwd
+raw_user:x:1001:1001::/home/raw_user:/bin/sh
+
+$ grep raw_user /etc/shadow
+raw_user:!:20699:0:99999:7:::
+
+$ grep raw_user /etc/group
+raw_user:x:1001:
+
+--- Notice: NO home directory was created ---
+$ ls -la /home
+total 12
+drwxr-xr-x 1 root   root   4096 Sep  3 04:25 .
+drwxr-xr-x 1 root   root   4096 Sep  3 04:26 ..
+drwxr-x--- 2 ubuntu ubuntu 4096 Aug 10 14:55 ubuntu
+
+$ test -d /home/raw_user && echo 'home exists' || echo 'NO HOME DIRECTORY for raw_user'
+NO HOME DIRECTORY for raw_user
+
+--- Notice: login shell is /bin/sh (no shell set), and the account is LOCKED (! in shadow) ---
+$ passwd -S raw_user
+raw_user L 2026-09-03 0 99999 7 -1
+
+###############################################
+# STEP 2: Making useradd behave requires MANY flags
+###############################################
+$ useradd -m -s /bin/bash -c 'Manually Configured User' -G sudo flag_user
+
+$ grep flag_user /etc/passwd
+flag_user:x:1002:1002:Manually Configured User:/home/flag_user:/bin/bash
+
+$ ls -la /home/flag_user
+total 20
+drwxr-x--- 2 flag_user flag_user 4096 Sep  3 04:26 .
+drwxr-xr-x 1 root      root      4096 Sep  3 04:26 ..
+-rw-r--r-- 1 flag_user flag_user  220 Mar 31  2024 .bash_logout
+-rw-r--r-- 1 flag_user flag_user 3771 Mar 31  2024 .bashrc
+-rw-r--r-- 1 flag_user flag_user  807 Mar 31  2024 .profile
+
+$ groups flag_user
+flag_user : flag_user sudo
+
+$ passwd -S flag_user
+flag_user L 2026-09-03 0 99999 7 -1
+
+###############################################
+# STEP 3: The RECOMMENDED way on Ubuntu/Debian -- adduser
+###############################################
+--- Interactively you would simply type:  sudo adduser testuser
+    and answer its prompts:
+    Adding user `testuser' ...
+    Adding new group `testuser' (1001) ...
+    Adding new user `testuser' (1001) with group `testuser' ...
+    Creating home directory `/home/testuser' ...
+    Copying files from `/etc/skel' ...
+    New password:
+    Retype new password:
+    Full Name []: Test User
+    Room Number []: 101
+    Work Phone []: 555-0100
+    Home Phone []: 555-0101
+    Other []: DevOps Homework
+    Is the information correct? [Y/n] Y
+
+--- Same thing, run non-interactively (scriptable form): ---
+$ adduser --gecos 'Test User,101,555-0100,555-0101,DevOps Homework' --disabled-password testuser
+info: Adding user `testuser' ...
+info: Selecting UID/GID from range 1000 to 59999 ...
+info: Adding new group `testuser' (1003) ...
+info: Adding new user `testuser' (1003) with group `testuser (1003)' ...
+info: Creating home directory `/home/testuser' ...
+info: Copying files from `/etc/skel' ...
+info: Adding new user `testuser' to supplemental / extra groups `users' ...
+info: Adding user `testuser' to group `users' ...
+
+$ echo 'testuser:TestPass@123' | chpasswd
+
+$ passwd -S testuser
+testuser P 2026-09-03 0 99999 7 -1
+
+
+$ grep testuser /etc/passwd
+testuser:x:1003:1003:Test User,101,555-0100,555-0101,DevOps Homework:/home/testuser:/bin/bash
+
+$ grep testuser /etc/group
+users:x:100:testuser
+testuser:x:1003:
+
+$ passwd -S testuser
+testuser P 2026-09-03 0 99999 7 -1
+
+--- adduser DID create and populate the home directory automatically: ---
+$ ls -la /home/testuser
+total 20
+drwxr-x--- 2 testuser testuser 4096 Sep  3 04:26 .
+drwxr-xr-x 1 root     root     4096 Sep  3 04:26 ..
+-rw-r--r-- 1 testuser testuser  220 Sep  3 04:26 .bash_logout
+-rw-r--r-- 1 testuser testuser 3771 Sep  3 04:26 .bashrc
+-rw-r--r-- 1 testuser testuser  807 Sep  3 04:26 .profile
+
+--- ...by copying the skeleton directory /etc/skel: ---
+$ ls -la /etc/skel
+total 24
+drwxr-xr-x 2 root root 4096 Aug 10 14:49 .
+drwxr-xr-x 1 root root 4096 Sep  3 04:26 ..
+-rw-r--r-- 1 root root  220 Mar 31  2024 .bash_logout
+-rw-r--r-- 1 root root 3771 Mar 31  2024 .bashrc
+-rw-r--r-- 1 root root  807 Mar 31  2024 .profile
+
+--- ...and it created a matching USER PRIVATE GROUP: ---
+$ id testuser
+uid=1003(testuser) gid=1003(testuser) groups=1003(testuser),100(users)
+
+###############################################
+# STEP 4: Side-by-side comparison of the 3 accounts
+###############################################
+$ grep -E 'raw_user|flag_user|testuser' /etc/passwd
+raw_user:x:1001:1001::/home/raw_user:/bin/sh
+flag_user:x:1002:1002:Manually Configured User:/home/flag_user:/bin/bash
+testuser:x:1003:1003:Test User,101,555-0100,555-0101,DevOps Homework:/home/testuser:/bin/bash
+
+format: name:passwd:UID:GID:GECOS/comment:home:shell
+
+$ for u in raw_user flag_user testuser; do printf '%-10s home=%-18s shell=%-10s\n' "$u" "$(getent passwd $u | cut -d: -f6)" "$(getent passwd $u | cut -d: -f7)"; done
+raw_user   home=/home/raw_user     shell=/bin/sh   
+flag_user  home=/home/flag_user    shell=/bin/bash 
+testuser   home=/home/testuser     shell=/bin/bash 
+
+###############################################
+# STEP 5: Prove the recommended user actually works
+###############################################
+$ su - testuser -c 'whoami; pwd; echo $SHELL; ls -a'
+testuser
+/home/testuser
+/bin/bash
+.
+..
+.bash_logout
+.bashrc
+.profile
+
+###############################################
+# STEP 6: adduser also manages groups & sudo access
+###############################################
+$ adduser testuser sudo
+info: Adding user `testuser' to group `sudo' ...
+
+$ groups testuser
+testuser : testuser sudo users
+
+###############################################
+# STEP 7: Config file that adduser reads (useradd ignores it)
+###############################################
+$ grep -vE '^#|^$' /etc/adduser.conf
+
+###############################################
+# STEP 8: Deleting users
+###############################################
+$ deluser --remove-home raw_user
+info: Looking for files to backup/remove ...
+warn: `/usr/bin/crontab' not executed. Skipping crontab removal. Package `cron' required.
+info: Removing user `raw_user' ...
+
+$ userdel -r flag_user
+userdel: flag_user mail spool (/var/mail/flag_user) not found
+
+$ grep -E 'raw_user|flag_user' /etc/passwd || echo 'both removed'
+both removed
+
+--- keeping testuser as the required deliverable ---
+$ getent passwd testuser
+testuser:x:1003:1003:Test User,101,555-0100,555-0101,DevOps Homework:/home/testuser:/bin/bash
+
