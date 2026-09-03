@@ -1,0 +1,64 @@
+###########################################################
+#  BUILDING THE MULTI-STAGE IMAGE
+###########################################################
+$ docker build -t multistage-hello:1.0 .
+#0 building with "desktop-linux" instance using docker driver
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.82kB done
+#2 [internal] load metadata for docker.io/library/node:20-alpine
+#3 [internal] load .dockerignore
+#3 transferring context: 92B done
+#4 [builder 1/5] FROM docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293
+#4 resolve docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 done
+#5 [builder 2/5] WORKDIR /app
+#5 CACHED
+#6 [internal] load build context
+#6 transferring context: 2.27kB done
+#7 [builder 3/5] COPY package*.json ./
+#8 [builder 4/5] RUN npm install
+#8 20.00 
+#8 20.00 added 68 packages, and audited 69 packages in 20s
+#8 20.00 
+#8 20.00 15 packages are looking for funding
+#8 20.00   run `npm fund` for details
+#8 20.00 
+#8 20.00 3 moderate severity vulnerabilities
+#8 20.00 
+#8 20.00 To address all issues, run:
+#8 20.00   npm audit fix
+#8 20.00 
+#8 20.00 Run `npm audit` for details.
+#8 20.00 npm notice
+#8 20.00 npm notice New major version of npm available! 10.8.2 -> 12.0.2
+#8 20.00 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.2
+#8 20.00 npm notice To update run: npm install -g npm@12.0.2
+#8 20.00 npm notice
+#9 [builder 5/5] COPY . .
+#10 [production 3/5] COPY --from=builder /app/package*.json ./
+#11 [production 4/5] RUN npm install --omit=dev && npm cache clean --force
+#11 2.622 
+#11 2.622 added 68 packages, and audited 69 packages in 2s
+#11 2.622 
+#11 2.622 15 packages are looking for funding
+#11 2.622   run `npm fund` for details
+#11 2.631 
+#11 2.631 3 moderate severity vulnerabilities
+#11 2.631 
+#11 2.631 To address all issues, run:
+#11 2.631   npm audit fix
+#11 2.631 
+#11 2.631 Run `npm audit` for details.
+#11 2.632 npm notice
+#11 2.632 npm notice New major version of npm available! 10.8.2 -> 12.0.2
+#11 2.632 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.2
+#11 2.632 npm notice To update run: npm install -g npm@12.0.2
+#11 2.632 npm notice
+#11 2.739 npm warn using --force Recommended protections disabled.
+#12 [production 5/5] COPY --from=builder /app/server.js ./
+#13 exporting to image
+#13 exporting layers 0.1s done
+#13 exporting manifest sha256:2b43f677942548232e89b5b46d1c8501f70ac7c237ddc226ae3835fd4876345b done
+#13 exporting config sha256:c1688f430e49516829734a8225619ae9a2cf3f4bf67f7a40d32b4d9e03014daf done
+#13 exporting attestation manifest sha256:fa1d0bd2bf466208824971be86da2b0de2098cf1ee365f49eb3a1b7684affc64 done
+#13 exporting manifest list sha256:be1a0a836386ad8114187a8599cdf1889c3f3c03041e1209908fae179710fda5 done
+#13 naming to docker.io/library/multistage-hello:1.0 done

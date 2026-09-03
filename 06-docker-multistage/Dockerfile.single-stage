@@ -1,0 +1,18 @@
+# =============================================================================
+#  SINGLE-STAGE Dockerfile - kept ONLY for size comparison against the
+#  multi-stage build. This one carries the whole dev toolchain and all
+#  dev dependencies into the final image.
+# =============================================================================
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install                # installs dev dependencies too
+
+COPY . .
+
+ENV PORT=8080
+EXPOSE 8080
+
+CMD ["npm", "start"]

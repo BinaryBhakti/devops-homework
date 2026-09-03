@@ -1,0 +1,72 @@
+===================================================
+  RUN THE CONTAINER
+===================================================
+$ docker run -d --name multistage-app -p 8080:8080 multistage-hello:1.0
+0cf263486714
+
+===================================================
+  docker ps  --  container running on port 8080
+===================================================
+$ docker ps
+CONTAINER ID   IMAGE                  COMMAND                  CREATED         STATUS         PORTS                                         NAMES
+0cf263486714   multistage-hello:1.0   "docker-entrypoint.s…"   5 seconds ago   Up 5 seconds   0.0.0.0:8080->8080/tcp, [::]:8080->8080/tcp   multistage-app
+
+$ docker ps --format 'table {{.Names}}	{{.Image}}	{{.Status}}	{{.Ports}}'
+NAMES            IMAGE                  STATUS         PORTS
+multistage-app   multistage-hello:1.0   Up 5 seconds   0.0.0.0:8080->8080/tcp, [::]:8080->8080/tcp
+
+===================================================
+  CONTAINER LOGS
+===================================================
+$ docker logs multistage-app
+
+> docker-hello-world@1.0.0 start
+> node server.js
+
+Server running on port 8080
+
+===================================================
+  ACCESS THE APPLICATION ON PORT 8080
+===================================================
+$ curl -i http://localhost:8080
+HTTP/1.1 200 OK
+X-Powered-By: Express
+Content-Type: text/html; charset=utf-8
+Content-Length: 919
+ETag: W/"397-Y6s5h8wg85d8tt8pbyCl3yCoXug"
+Date: Thu, 03 Sep 2026 04:47:54 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Docker Multi-Stage Build</title>
+
+$ curl -s http://localhost:8080 | grep '<h1>'
+<h1>Hello World from Docker multi-stage build</h1>
+
+$ curl -s http://localhost:8080/health
+{"status":"ok","app":"multi-stage","port":"8080"}
+
+===================================================
+  PROOF THE APP LISTENS ON 8080 INSIDE THE CONTAINER
+===================================================
+$ docker exec multistage-app netstat -tlnp 2>/dev/null || docker port multistage-app
+8080/tcp -> 0.0.0.0:8080
+8080/tcp -> [::]:8080
+
+$ docker inspect --format '{{json .Config.ExposedPorts}}' multistage-app
+{"8080/tcp":{}}
+
+$ docker inspect --format '{{json .NetworkSettings.Ports}}' multistage-app
+{"8080/tcp":[{"HostIp":"0.0.0.0","HostPort":"8080"},{"HostIp":"::","HostPort":"8080"}]}
+
+===================================================
+  IMAGE SIZE: MULTI-STAGE vs SINGLE-STAGE
+===================================================
+$ docker images
+REPOSITORY          TAG         SIZE
+react-singlestage   1.0         411MB
+singlestage-hello   1.0         210MB
+multistage-hello    1.0         199MB
+hw-react-app        1.0         76.1MB
