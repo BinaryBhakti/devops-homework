@@ -1,0 +1,221 @@
+
+===================================================
+  0. Docker's default networks
+===================================================
+$ docker network ls
+NETWORK ID     NAME               DRIVER    SCOPE
+6743847ee34f   booking_default    bridge    local
+aad45cd6da1c   bridge             bridge    local
+88e072eaf0db   host               host      local
+a7402c0ed715   none               null      local
+7c79a09e438d   sst-mess_default   bridge    local
+
+-- bridge = default for containers, host = share the host stack, none = no networking --
+
+===================================================
+  1. CREATE 3 USER-DEFINED BRIDGE NETWORKS
+===================================================
+$ docker network create frontend-net
+9d7207c9071ceec7350f7adbc13ead110ed81db8ecbebbea4b63f23a7bd175b3
+
+$ docker network create backend-net
+e1588f75108418caae617c0575d75cedceac5d5bc8e487a2496b23e3170acd3b
+
+$ docker network create mgmt-net
+718fd556f11c623016ee5ee220ff6310868a29c0c323882015027b155e335cda
+
+$ docker network ls --filter driver=bridge
+NETWORK ID     NAME               DRIVER    SCOPE
+e1588f751084   backend-net        bridge    local
+6743847ee34f   booking_default    bridge    local
+aad45cd6da1c   bridge             bridge    local
+9d7207c9071c   frontend-net       bridge    local
+718fd556f11c   mgmt-net           bridge    local
+7c79a09e438d   sst-mess_default   bridge    local
+
+-- User-defined bridges give you automatic DNS: containers resolve each other BY NAME. --
+$ docker network inspect frontend-net --format '{{.Name}} -> subnet {{range .IPAM.Config}}{{.Subnet}}{{end}} gateway {{range .IPAM.Config}}{{.Gateway}}{{end}}'
+frontend-net -> subnet 172.20.0.0/16 gateway 172.20.0.1
+
+$ docker network inspect backend-net  --format '{{.Name}} -> subnet {{range .IPAM.Config}}{{.Subnet}}{{end}} gateway {{range .IPAM.Config}}{{.Gateway}}{{end}}'
+backend-net -> subnet 172.21.0.0/16 gateway 172.21.0.1
+
+$ docker network inspect mgmt-net     --format '{{.Name}} -> subnet {{range .IPAM.Config}}{{.Subnet}}{{end}} gateway {{range .IPAM.Config}}{{.Gateway}}{{end}}'
+mgmt-net -> subnet 172.22.0.0/16 gateway 172.22.0.1
+
+
+===================================================
+  2. START THE DATABASE (MySQL) on backend-net ONLY
+===================================================
+$ docker run -d --name database --network backend-net       -e MYSQL_ROOT_PASSWORD=rootpass       -e MYSQL_DATABASE=appdb       -e MYSQL_USER=appuser       -e MYSQL_PASSWORD=apppass       mysql:8.0
+0744113d34ba48cd7855b2c948c4ab200c9c44f6a324821d3de03f5ba630df78
+
+
+===================================================
+  3. START THE FRONTEND (Nginx) on frontend-net ONLY
+===================================================
+$ docker run -d --name frontend --network frontend-net nginx:alpine
+Unable to find image 'nginx:alpine' locally
+alpine: Pulling from library/nginx
+badda8760139: Pulling fs layer
+1791812138bb: Pulling fs layer
+accee44535cd: Pulling fs layer
+d6c1262595ab: Pulling fs layer
+2123acec2175: Pulling fs layer
+853498d24c3c: Pulling fs layer
+9592924c961c: Pulling fs layer
+a855f9d558c0: Download complete
+1791812138bb: Download complete
+c4f99b055a72: Download complete
+d6c1262595ab: Download complete
+2123acec2175: Download complete
+853498d24c3c: Download complete
+9592924c961c: Download complete
+accee44535cd: Download complete
+1791812138bb: Pull complete
+d6c1262595ab: Pull complete
+2123acec2175: Pull complete
+853498d24c3c: Pull complete
+9592924c961c: Pull complete
+accee44535cd: Pull complete
+badda8760139: Download complete
+badda8760139: Pull complete
+Digest: sha256:a9ae6f6d078d477e21323310498e5196cb2b7c0aedd9e07b7306612077227d7c
+Status: Downloaded newer image for nginx:alpine
+23b742fd5f0be587c9346fdcb136f853dc63faaa8c37615b33331edfdcb5fdaf
+
+
+===================================================
+  4. START THE BACKEND (Alpine) on frontend-net, then ATTACH it to backend-net
+===================================================
+-- A container can only be given ONE network with 'docker run --network'. --
+-- Additional networks are added afterwards with 'docker network connect'. --
+$ docker run -d --name backend --network frontend-net alpine:latest sleep infinity
+1ca57f8f123016c5c23b8a0a6fe4f1cd4977e90b75ae41d7706965e56421884d
+
+$ docker network connect backend-net backend
+
+-- backend is now on TWO networks: --
+$ docker inspect backend --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} = {{$v.IPAddress}}{{println}}{{end}}'
+backend-net = 172.21.0.3
+frontend-net = 172.20.0.3
+
+
+
+===================================================
+  5. WHO IS ON WHICH NETWORK?
+===================================================
+$ docker network inspect frontend-net --format 'frontend-net: {{range .Containers}}{{.Name}}({{.IPv4Address}}) {{end}}'
+frontend-net: backend(172.20.0.3/16) frontend(172.20.0.2/16) 
+
+$ docker network inspect backend-net  --format 'backend-net : {{range .Containers}}{{.Name}}({{.IPv4Address}}) {{end}}'
+backend-net : database(172.21.0.2/16) backend(172.21.0.3/16) 
+
+$ docker network inspect mgmt-net     --format 'mgmt-net    : {{range .Containers}}{{.Name}}({{.IPv4Address}}) {{end}}'
+mgmt-net    : 
+
+    +--------------------+                      +--------------------+
+    |   frontend-net     |                      |    backend-net     |
+    |                    |                      |                    |
+    |  [frontend]        |                      |        [database]  |
+    |       \            |                      |          /         |
+    |        \___ [ backend ] ___________________________/           |
+    |            (on BOTH networks - the only bridge between them)   |
+    +--------------------+                      +--------------------+
+
+    +--------------------+
+    |     mgmt-net       |   created but empty - proves networks are
+    |     (empty)        |   independent, isolated broadcast domains
+    +--------------------+
+
+===================================================
+  6. INSTALL NETWORK TOOLS IN THE TEST CONTAINERS
+===================================================
+$ docker exec backend sh -c 'apk add --no-cache curl bind-tools mysql-client >/dev/null 2>&1; echo tools installed'
+tools installed
+
+$ docker exec frontend sh -c 'apk add --no-cache curl bind-tools >/dev/null 2>&1; echo tools installed'
+tools installed
+
+
+===================================================
+  7. CONNECTIVITY TEST: frontend  ->  backend   (SAME network: frontend-net)
+===================================================
+$ docker exec frontend ping -c 3 backend
+PING backend (172.20.0.3): 56 data bytes
+64 bytes from 172.20.0.3: seq=0 ttl=64 time=0.565 ms
+64 bytes from 172.20.0.3: seq=1 ttl=64 time=0.285 ms
+64 bytes from 172.20.0.3: seq=2 ttl=64 time=0.294 ms
+
+--- backend ping statistics ---
+3 packets transmitted, 3 packets received, 0% packet loss
+round-trip min/avg/max = 0.285/0.381/0.565 ms
+
+$ docker exec frontend nslookup backend
+Server:		127.0.0.11
+Address:	127.0.0.11#53
+
+Non-authoritative answer:
+Name:	backend
+Address: 172.20.0.3
+
+
+-- Name resolution works because they share a user-defined bridge. --
+
+===================================================
+  8. CONNECTIVITY TEST: backend  ->  frontend   (SAME network: frontend-net)
+===================================================
+$ docker exec backend ping -c 3 frontend
+PING frontend (172.20.0.2): 56 data bytes
+64 bytes from 172.20.0.2: seq=0 ttl=64 time=0.062 ms
+64 bytes from 172.20.0.2: seq=1 ttl=64 time=0.323 ms
+64 bytes from 172.20.0.2: seq=2 ttl=64 time=0.278 ms
+
+--- frontend ping statistics ---
+3 packets transmitted, 3 packets received, 0% packet loss
+round-trip min/avg/max = 0.062/0.221/0.323 ms
+
+$ docker exec backend curl -s -o /dev/null -w 'HTTP %{http_code} from frontend nginx\n' http://frontend
+HTTP 200 from frontend nginx
+
+
+===================================================
+  9. CONNECTIVITY TEST: backend  ->  database   (SAME network: backend-net)
+===================================================
+$ docker exec backend ping -c 3 database
+PING database (172.21.0.2): 56 data bytes
+64 bytes from 172.21.0.2: seq=0 ttl=64 time=1.345 ms
+64 bytes from 172.21.0.2: seq=1 ttl=64 time=0.403 ms
+64 bytes from 172.21.0.2: seq=2 ttl=64 time=0.355 ms
+
+--- database ping statistics ---
+3 packets transmitted, 3 packets received, 0% packet loss
+round-trip min/avg/max = 0.355/0.701/1.345 ms
+
+$ docker exec backend nslookup database
+Server:		127.0.0.11
+Address:	127.0.0.11#53
+
+Non-authoritative answer:
+Name:	database
+Address: 172.21.0.2
+
+
+
+===================================================
+  10. THE KEY TEST -- frontend  ->  database   (NO shared network)
+===================================================
+-- frontend is on frontend-net; database is on backend-net. --
+-- They share NO network, so this MUST fail: --
+$ docker exec frontend ping -c 2 -W 2 database
+ping: bad address 'database'
+
+$ docker exec frontend nslookup database
+Server:		127.0.0.11
+Address:	127.0.0.11#53
+
+** server can't find database: NXDOMAIN
+
+
+-- Isolation confirmed. Only 'backend' can reach the database. --
+-- This is exactly how you protect a database in a real deployment. --

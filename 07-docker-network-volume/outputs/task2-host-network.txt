@@ -1,0 +1,139 @@
+
+===================================================
+  1. PULL THE APACHE IMAGE FROM DOCKER HUB
+===================================================
+$ docker pull httpd:2.4
+httpd:2.4  ->  image 979c38c2228d   size 207MB
+
+
+===================================================
+  2. RUN APACHE WITH THE HOST NETWORK
+===================================================
+$ docker run -d --name apache-host --network host httpd:2.4
+309eccbad80d
+
+$ docker ps --filter name=apache-host --format 'table {{.Names}}	{{.Image}}	{{.Status}}	{{.Ports}}	{{.Networks}}'
+NAMES         IMAGE       STATUS         PORTS     NETWORKS
+apache-host   httpd:2.4   Up 4 minutes             host
+
+-- The PORTS column is EMPTY. With --network host there is no port
+-- mapping at all: the container binds straight to the host's ports. --
+
+===================================================
+  3. WHAT --network host ACTUALLY DOES  (vs a normal bridge container)
+===================================================
+--- HOST-NETWORK container ---
+$ docker inspect apache-host --format 'NetworkMode  : {{.HostConfig.NetworkMode}}'
+NetworkMode  : host
+
+$ docker inspect apache-host --format 'Network+IP   : {{range $k,$v := .NetworkSettings.Networks}}{{$k}} = "{{$v.IPAddress}}"{{end}}   <- empty: no IP of its own'
+Network+IP   : host = "invalid IP"   <- Docker prints this when there is NO IP: the container has none of its own
+
+$ docker inspect apache-host --format 'PortBindings : {{.HostConfig.PortBindings}}   <- none needed'
+PortBindings : map[]   <- none needed
+
+--- BRIDGE container (apache-bridge, started with -p 9080:80) ---
+$ docker inspect apache-bridge --format 'NetworkMode  : {{.HostConfig.NetworkMode}}'
+NetworkMode  : bridge
+
+$ docker inspect apache-bridge --format 'Network+IP   : {{range $k,$v := .NetworkSettings.Networks}}{{$k}} = "{{$v.IPAddress}}"{{end}}   <- its own private IP'
+Network+IP   : bridge = "172.17.0.10"   <- its own private IP
+
+$ docker inspect apache-bridge --format 'PortBindings : {{.HostConfig.PortBindings}}'
+PortBindings : map[80/tcp:[{invalid IP 9080}]]
+
+
+===================================================
+  4. THE CONTAINER SHARES THE HOST'S NETWORK NAMESPACE
+===================================================
+$ docker exec apache-host hostname
+docker-desktop
+-- ^ it reports the HOST's hostname, not a random container id --
+
+-- Interfaces a HOST-network container sees: --
+$ docker run --rm --network host alpine ip addr show
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1000
+    inet 127.0.0.1/8 scope host lo
+2: bond0: <BROADCAST,MULTICAST400> mtu 1500 qdisc noop state DOWN qlen 1000
+3: dummy0: <BROADCAST,NOARP> mtu 1500 qdisc noop state DOWN qlen 1000
+4: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 65535 qdisc pfifo_fast state UP qlen 1000
+    inet 192.168.65.3/24 brd 192.168.65.255 scope global eth0
+5: teql0: <NOARP> mtu 1500 qdisc noop state DOWN qlen 100
+6: tunl0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN qlen 1000
+7: gre0@NONE: <NOARP> mtu 1476 qdisc noop state DOWN qlen 1000
+8: gretap0@NONE: <BROADCAST,MULTICAST> mtu 1462 qdisc noop state DOWN qlen 1000
+9: erspan0@NONE: <BROADCAST,MULTICAST> mtu 1450 qdisc noop state DOWN qlen 1000
+10: ip_vti0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN qlen 1000
+
+-- Interfaces a BRIDGE container sees (its own isolated namespace): --
+$ docker run --rm alpine ip addr show
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1000
+    inet 127.0.0.1/8 scope host lo
+2: tunl0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN qlen 1000
+3: gre0@NONE: <NOARP> mtu 1476 qdisc noop state DOWN qlen 1000
+4: gretap0@NONE: <BROADCAST,MULTICAST> mtu 1462 qdisc noop state DOWN qlen 1000
+5: erspan0@NONE: <BROADCAST,MULTICAST> mtu 1450 qdisc noop state DOWN qlen 1000
+6: ip_vti0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN qlen 1000
+7: ip6_vti0@NONE: <NOARP> mtu 1428 qdisc noop state DOWN qlen 1000
+8: sit0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN qlen 1000
+9: ip6tnl0@NONE: <NOARP> mtu 1452 qdisc noop state DOWN qlen 1000
+10: ip6gre0@NONE: <NOARP> mtu 1448 qdisc noop state DOWN qlen 1000
+11: eth0@if81: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 65535 qdisc noqueue state UP 
+
+===================================================
+  5. ACCESS THE APACHE SITE ON PORT 80
+===================================================
+-- From another container sharing the same host network namespace: --
+$ docker run --rm --network host alpine sh -c 'apk add curl; curl -i http://localhost:80'
+HTTP/1.1 200 OK
+Date: Thu, 03 Sep 2026 05:01:12 GMT
+Server: Apache/2.4.68 (Unix)
+Last-Modified: Fri, 07 Nov 2025 08:23:08 GMT
+ETag: "bf-642fce432f300"
+Accept-Ranges: bytes
+Content-Length: 191
+Content-Type: text/html
+
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+
+-- Proof this really is port 80 of the host, with NO -p flag anywhere: --
+$ docker run --rm --network host alpine sh -c 'netstat -tln | grep ":80 "'
+tcp        0      0 :::80                   :::*                    LISTEN      
+
+-- By contrast a BRIDGE container CANNOT see the host's port 80 on localhost: --
+$ docker run --rm alpine sh -c 'nc -z -w2 localhost 80 && echo open || echo closed'
+port 80 CLOSED - separate network namespace
+
+===================================================
+  6. PLATFORM NOTE  (macOS / Windows vs Linux)
+===================================================
+  This lab was run on macOS with Docker Desktop.
+
+  On LINUX, "the host" is the machine itself. A --network host container
+  binds the real machine's port 80, so http://localhost works straight
+  away in the browser.
+
+  On macOS/Windows, Docker runs inside a lightweight Linux VM. --network
+  host gives the container the VM's network namespace, not the Mac's.
+  It genuinely serves on port 80 of that host (proved with HTTP 200 above),
+  but the Mac's own localhost:80 will not reach it unless
+  "Enable host networking" is turned on in
+  Docker Desktop -> Settings -> Resources -> Network.
+
+  Measured from the Mac side:
+$ curl --max-time 5 http://localhost:80        # host-network apache, from macOS
+HTTP 000   (000 = no connection from macOS)
+$ curl --max-time 5 http://localhost:9080      # bridge apache with -p 9080:80
+HTTP 200   (bridge + port mapping works from macOS)
+
+-- Same Apache page, reachable from the Mac browser via the bridge container: --
+$ curl -s http://localhost:9080
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+<title>It works! Apache httpd</title>
+</head>
+<body>
+<p>It works!</p>
+</body>
+</html>

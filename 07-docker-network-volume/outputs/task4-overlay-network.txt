@@ -1,0 +1,239 @@
+
+===================================================
+  1. WHY OVERLAY? THE PROBLEM BRIDGE NETWORKS CANNOT SOLVE
+===================================================
+  A bridge network is LOCAL TO ONE DOCKER HOST. Two containers on two
+  different machines cannot talk over a bridge, because the bridge is just
+  a virtual switch inside a single kernel.
+
+  An OVERLAY network spans MULTIPLE Docker hosts. Containers on different
+  physical machines get addresses on one logical layer-2 network and can
+  reach each other by name, as if they were plugged into the same switch.
+
+      HOST A                                HOST B
+   +-----------------+                  +-----------------+
+   |  web.1          |                  |  web.2          |
+   |  10.0.1.5       |                  |  10.0.1.6       |
+   |      |          |                  |      |          |
+   |  [overlay ep]   |                  |  [overlay ep]   |
+   +------|----------+                  +------|----------+
+          |      VXLAN tunnel (UDP 4789)       |
+          +------------------------------------+
+             physical network (eth0 <-> eth0)
+
+  HOW IT WORKS
+    - Encapsulation: VXLAN wraps each container ethernet frame inside a
+      UDP packet (default port 4789) and sends it to the other host, which
+      unwraps it. The containers never see the physical network.
+    - Control plane: the Swarm managers gossip node/endpoint/service data
+      so every host knows which container lives where.
+    - Address management: Docker hands out IPs from the overlay subnet and
+      guarantees they are unique across the whole cluster.
+    - Service discovery: an internal DNS server resolves service names to
+      a Virtual IP (VIP) that load-balances across all the replicas.
+
+  PORTS THAT MUST BE OPEN BETWEEN HOSTS
+    TCP 2377  cluster management (swarm control plane)
+    TCP/UDP 7946  node-to-node communication (gossip)
+    UDP 4789  VXLAN data plane (the actual overlay traffic)
+
+  USE CASES
+    - Multi-host container clusters (Docker Swarm services)
+    - Scaling one service across several machines with built-in
+      load balancing via the routing mesh
+    - Keeping east-west service traffic isolated from the physical LAN
+    - Encrypting inter-host traffic with --opt encrypted (IPSec)
+
+===================================================
+  2. CREATE A REAL OVERLAY NETWORK  (requires swarm mode)
+===================================================
+-- An overlay network needs a swarm control plane, so first: --
+$ docker swarm init
+Swarm initialized: current node (xqwg4v77pht7ahcvg26sizthj) is now a manager.
+
+To add a worker to this swarm, run the following command:
+
+    docker swarm join --token SWMTKN-1-5stb0d711htfqdfb15fksd2i8v0bnix2rkbckzy89oa07mudvh-bcnueztl3o17mxw071rw9ejey 192.168.65.3:2377
+
+To add a manager to this swarm, run 'docker swarm join-token manager' and follow the instructions.
+
+$ docker info --format 'Swarm: {{.Swarm.LocalNodeState}}  NodeID: {{.Swarm.NodeID}}  Managers: {{.Swarm.Managers}}  Nodes: {{.Swarm.Nodes}}'
+Swarm: active  NodeID: xqwg4v77pht7ahcvg26sizthj  Managers: 1  Nodes: 1
+
+$ docker node ls
+ID                            HOSTNAME         STATUS    AVAILABILITY   MANAGER STATUS   ENGINE VERSION
+xqwg4v77pht7ahcvg26sizthj *   docker-desktop   Ready     Active         Leader           29.7.2
+
+-- Notice swarm mode AUTOMATICALLY created an overlay called 'ingress': --
+$ docker network ls --filter driver=overlay
+NETWORK ID     NAME      DRIVER    SCOPE
+mdgvwqhojmfo   ingress   overlay   swarm
+
+
+===================================================
+  3. CREATE OUR OWN OVERLAY NETWORK
+===================================================
+$ docker network create --driver overlay --attachable app-overlay
+x732cdj0yzk63xw46ud8odqw1
+
+$ docker network ls --filter driver=overlay
+NETWORK ID     NAME          DRIVER    SCOPE
+x732cdj0yzk6   app-overlay   overlay   swarm
+mdgvwqhojmfo   ingress       overlay   swarm
+
+$ docker network inspect app-overlay --format 'Name={{.Name}}  Driver={{.Driver}}  Scope={{.Scope}}  Attachable={{.Attachable}}  Subnet={{range .IPAM.Config}}{{.Subnet}}{{end}}'
+Name=app-overlay  Driver=overlay  Scope=swarm  Attachable=true  Subnet=10.0.1.0/24
+
+-- Scope=swarm (not 'local' like a bridge) is the key difference. --
+$ docker network inspect bridge --format 'For comparison: Name={{.Name}}  Driver={{.Driver}}  Scope={{.Scope}}'
+For comparison: Name=bridge  Driver=bridge  Scope=local
+
+
+===================================================
+  4. DEPLOY A SERVICE ONTO THE OVERLAY
+===================================================
+$ docker service create --name web --network app-overlay --replicas 3 -p 9095:80 nginx:alpine
+2jy8obqudxmjv8y85qr7lobig
+overall progress: 0 out of 3 tasks
+1/3:  
+2/3:  
+3/3:  
+overall progress: 0 out of 3 tasks
+overall progress: 0 out of 3 tasks
+overall progress: 0 out of 3 tasks
+overall progress: 0 out of 3 tasks
+overall progress: 3 out of 3 tasks
+verify: Waiting 5 seconds to verify that tasks are stable...
+verify: Waiting 5 seconds to verify that tasks are stable...
+verify: Waiting 5 seconds to verify that tasks are stable...
+verify: Waiting 5 seconds to verify that tasks are stable...
+verify: Waiting 5 seconds to verify that tasks are stable...
+verify: Waiting 4 seconds to verify that tasks are stable...
+verify: Waiting 4 seconds to verify that tasks are stable...
+verify: Waiting 4 seconds to verify that tasks are stable...
+verify: Waiting 4 seconds to verify that tasks are stable...
+verify: Waiting 4 seconds to verify that tasks are stable...
+verify: Waiting 3 seconds to verify that tasks are stable...
+verify: Waiting 3 seconds to verify that tasks are stable...
+verify: Waiting 3 seconds to verify that tasks are stable...
+verify: Waiting 3 seconds to verify that tasks are stable...
+verify: Waiting 2 seconds to verify that tasks are stable...
+verify: Waiting 2 seconds to verify that tasks are stable...
+verify: Waiting 2 seconds to verify that tasks are stable...
+verify: Waiting 2 seconds to verify that tasks are stable...
+verify: Waiting 2 seconds to verify that tasks are stable...
+verify: Waiting 1 seconds to verify that tasks are stable...
+verify: Waiting 1 seconds to verify that tasks are stable...
+verify: Waiting 1 seconds to verify that tasks are stable...
+verify: Waiting 1 seconds to verify that tasks are stable...
+verify: Waiting 1 seconds to verify that tasks are stable...
+verify: Service 2jy8obqudxmjv8y85qr7lobig converged
+
+$ docker service ls
+ID             NAME      MODE         REPLICAS   IMAGE          PORTS
+2jy8obqudxmj   web       replicated   3/3        nginx:alpine   *:9095->80/tcp
+
+$ docker service ps web
+ID             NAME      IMAGE          NODE             DESIRED STATE   CURRENT STATE           ERROR     PORTS
+js521sdr9xq5   web.1     nginx:alpine   docker-desktop   Running         Running 5 seconds ago             
+irmrah2sgi2w   web.2     nginx:alpine   docker-desktop   Running         Running 5 seconds ago             
+y2p4p7xsb6bc   web.3     nginx:alpine   docker-desktop   Running         Running 5 seconds ago             
+
+-- 3 replicas, all attached to the overlay network. --
+
+===================================================
+  5. SERVICE DISCOVERY AND LOAD BALANCING ACROSS THE OVERLAY
+===================================================
+$ docker run -d --name overlay-client --network app-overlay alpine:latest sleep infinity
+9ec05fa2395cf46a9d712c456a01b4ca55f29027d700bac5b5b8d102e619406a
+
+$ docker exec overlay-client sh -c 'apk add --no-cache bind-tools curl >/dev/null 2>&1; echo tools ready'
+tools ready
+
+-- The service name 'web' resolves to a Virtual IP (VIP): --
+$ docker exec overlay-client nslookup web
+Server:		127.0.0.11
+Address:	127.0.0.11#53
+
+Non-authoritative answer:
+Name:	web
+Address: 10.0.1.2
+
+
+-- tasks.web resolves to the individual replica IPs: --
+$ docker exec overlay-client nslookup tasks.web
+Server:		127.0.0.11
+Address:	127.0.0.11#53
+
+Non-authoritative answer:
+Name:	tasks.web
+Address: 10.0.1.5
+Name:	tasks.web
+Address: 10.0.1.4
+Name:	tasks.web
+Address: 10.0.1.3
+
+
+-- Traffic to the VIP is load balanced across the replicas: --
+$ docker exec overlay-client curl -s -o /dev/null -w 'HTTP %{http_code} via overlay VIP
+' http://web
+HTTP 200 via overlay VIP
+
+$ docker exec overlay-client sh -c 'for i in 1 2 3 4 5; do curl -s -o /dev/null -w "request $i -> HTTP %{http_code}
+" http://web; done'
+request 1 -> HTTP 200
+request 2 -> HTTP 200
+request 3 -> HTTP 200
+request 4 -> HTTP 200
+request 5 -> HTTP 200
+
+
+===================================================
+  6. THE ROUTING MESH  (published port reachable on every node)
+===================================================
+$ docker service inspect web --format 'Published: {{range .Endpoint.Ports}}{{.PublishedPort}} -> {{.TargetPort}} (mode: {{.PublishMode}}){{end}}'
+Published: 9095 -> 80 (mode: ingress)
+
+$ curl -s -o /dev/null -w 'HTTP %{http_code}
+' http://localhost:9095
+HTTP 200
+-- In 'ingress' publish mode ANY node in the swarm accepts traffic on
+-- 9095 and forwards it to a healthy replica, wherever it runs. --
+
+===================================================
+  7. OVERLAY vs BRIDGE  --  summary
+===================================================
+ +------------------+-----------------------------+------------------------------+
+ |                  | BRIDGE                      | OVERLAY                      |
+ +------------------+-----------------------------+------------------------------+
+ | Scope            | local (one host)            | swarm (many hosts)           |
+ | Spans hosts      | no                          | yes                          |
+ | Transport        | linux bridge + veth         | VXLAN over UDP 4789          |
+ | Needs swarm      | no                          | yes                          |
+ | Service DNS      | container name              | service name -> VIP          |
+ | Load balancing   | none built in               | built in (VIP + routing mesh)|
+ | Encryption       | n/a                         | optional --opt encrypted     |
+ | Typical use      | single-host apps, compose   | multi-host clusters          |
+ +------------------+-----------------------------+------------------------------+
+
+===================================================
+  8. CLEAN UP  (restore the machine to non-swarm mode)
+===================================================
+$ docker rm -f overlay-client
+overlay-client
+
+$ docker service rm web
+web
+
+$ docker network rm app-overlay
+app-overlay
+
+$ docker swarm leave --force
+Node left the swarm.
+
+$ docker info --format 'Swarm: {{.Swarm.LocalNodeState}}'
+Swarm: inactive
+
+$ docker network ls --filter driver=overlay
+NETWORK ID   NAME      DRIVER    SCOPE
+-- overlay networks are gone; the host is back to plain bridge networking --

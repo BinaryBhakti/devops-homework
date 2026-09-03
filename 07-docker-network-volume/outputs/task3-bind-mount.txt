@@ -1,0 +1,195 @@
+
+===================================================
+  1. THE FOLDER ON THE LOCAL MACHINE
+===================================================
+$ ls -l $(pwd)/bind-mount-demo/html
+total 8
+-rw-r--r--@ 1 ashmit  staff  645 Sep  3 10:31 index.html
+
+$ cat html/index.html
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Bind Mount Demo</title>
+  <style>
+    body{font-family:system-ui,-apple-system,sans-serif;display:grid;place-items:center;
+         min-height:100vh;margin:0;background:#1b1b1f;color:#f5f5f5}
+    .card{background:#26262b;padding:3rem 4rem;border-radius:14px;text-align:center;
+          border:1px solid #3a3a42}
+    h1{margin:0;font-size:3rem;color:#009639}
+    p{margin:.75rem 0 0;color:#a5a5b0}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Hello students</h1>
+    <p>version 1 &middot; served by Nginx from a bind-mounted folder</p>
+  </div>
+</body>
+</html>
+
+===================================================
+  2. BIND MOUNT THE FOLDER INTO AN NGINX CONTAINER
+===================================================
+$ docker run -d --name nginx-bind -p 9090:80 \
+      -v "$(pwd)/bind-mount-demo/html":/usr/share/nginx/html:ro \
+      nginx:alpine
+45e6f87b7ed5727cdfb2e7c8a4439b4f3bae488b9f0e731350dc7e5048418022
+
+$ docker ps --filter name=nginx-bind --format 'table {{.Names}}	{{.Image}}	{{.Status}}	{{.Ports}}'
+NAMES        IMAGE          STATUS         PORTS
+nginx-bind   nginx:alpine   Up 3 seconds   0.0.0.0:9090->80/tcp, [::]:9090->80/tcp
+
+===================================================
+  3. INSPECT THE MOUNT
+===================================================
+$ docker inspect nginx-bind --format '{{range .Mounts}}Type={{.Type}}  Source={{.Source}}  Destination={{.Destination}}  RW={{.RW}}{{end}}'
+Type=bind
+Source=/Users/ashmit/Desktop/DEV OPs/devops-homework/07-docker-network-volume/bind-mount-demo/html
+Destination=/usr/share/nginx/html
+ReadWrite=false
+
+-- Type=bind means the container is reading the REAL folder on the host, --
+-- not a copy. Nothing was baked into the image. --
+
+$ docker exec nginx-bind ls -l /usr/share/nginx/html
+total 4
+-rw-r--r--    1 root     root           645 Sep  3 05:01 index.html
+
+===================================================
+  4. ACCESS THE SITE  --  it should say 'Hello students'
+===================================================
+$ curl -s http://localhost:9090
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Bind Mount Demo</title>
+  <style>
+    body{font-family:system-ui,-apple-system,sans-serif;display:grid;place-items:center;
+         min-height:100vh;margin:0;background:#1b1b1f;color:#f5f5f5}
+    .card{background:#26262b;padding:3rem 4rem;border-radius:14px;text-align:center;
+          border:1px solid #3a3a42}
+    h1{margin:0;font-size:3rem;color:#009639}
+    p{margin:.75rem 0 0;color:#a5a5b0}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Hello students</h1>
+    <p>version 1 &middot; served by Nginx from a bind-mounted folder</p>
+  </div>
+</body>
+</html>
+
+$ curl -s http://localhost:9090 | grep '<h1>'
+<h1>Hello students</h1>
+
+===================================================
+  5. MODIFY index.html ON THE HOST  (container is NOT touched)
+===================================================
+$ docker inspect nginx-bind --format 'StartedAt={{.State.StartedAt}} RestartCount={{.RestartCount}}'
+StartedAt=2026-09-03T05:02:01.603607005Z  RestartCount=0
+-- Remember this start time. We will NOT restart the container. --
+
+$ edit bind-mount-demo/html/index.html on the Mac
+-- file rewritten --
+
+$ diff <(old) <(new)
+5c5
+<   <title>Bind Mount Demo</title>
+---
+>   <title>Bind Mount Demo - UPDATED</title>
+11c11
+<     h1{margin:0;font-size:3rem;color:#009639}
+---
+>     h1{margin:0;font-size:3rem;color:#e0a03a}
+12a13,14
+>     .tag{display:inline-block;margin-top:1rem;padding:.3rem .8rem;border-radius:999px;
+>          background:#15151a;color:#7fd1ff;font-size:.85rem}
+17,18c19,21
+<     <h1>Hello students</h1>
+<     <p>version 1 &middot; served by Nginx from a bind-mounted folder</p>
+---
+>     <h1>Hello students - UPDATED!</h1>
+>     <p>version 2 &middot; the file changed on the host</p>
+>     <span class="tag">the container was never restarted</span>
+
+
+===================================================
+  6. RELOAD THE PAGE  --  change appears with NO restart
+===================================================
+$ curl -s http://localhost:9090 | grep '<h1>'
+<h1>Hello students - UPDATED!</h1>
+
+$ curl -s http://localhost:9090 | grep -E '<h1>|version|tag">'
+<h1>Hello students - UPDATED!</h1>
+<p>version 2 &middot; the file changed on the host</p>
+<span class="tag">the container was never restarted</span>
+
+$ docker exec nginx-bind cat /usr/share/nginx/html/index.html | grep '<h1>'
+<h1>Hello students - UPDATED!</h1>
+
+-- Same start time, still zero restarts: --
+$ docker inspect nginx-bind --format 'StartedAt={{.State.StartedAt}} RestartCount={{.RestartCount}}'
+StartedAt=2026-09-03T05:02:01.603607005Z  RestartCount=0
+
+$ docker ps --filter name=nginx-bind --format 'table {{.Names}}	{{.Status}}'
+NAMES        STATUS
+nginx-bind   Up 48 seconds
+
+-- The change was picked up instantly because the container reads the
+-- host folder directly. This is why bind mounts are used for local
+-- development: edit on the host, refresh the browser. --
+
+===================================================
+  7. READ-ONLY MOUNT: the container cannot write back
+===================================================
+-- We mounted with :ro, so writes from inside must fail: --
+$ docker exec nginx-bind sh -c 'echo hacked > /usr/share/nginx/html/index.html'
+sh: can't create /usr/share/nginx/html/index.html: Read-only file system
+
+$ curl -s http://localhost:9090 | grep '<h1>'   # still intact
+<h1>Hello students - UPDATED!</h1>
+
+===================================================
+  8. BIND MOUNT vs NAMED VOLUME
+===================================================
+$ docker volume create demo-volume
+demo-volume
+
+$ docker run -d --name nginx-volume -p 9091:80 -v demo-volume:/usr/share/nginx/html nginx:alpine
+8715d9b451905a1b0f4a274a859a6dcf4093045180c01ed8e822eba2c8cc5a5e
+
+$ docker volume inspect demo-volume
+[
+    {
+        "CreatedAt": "2026-09-03T05:02:50Z",
+        "Driver": "local",
+        "Labels": null,
+        "Mountpoint": "/var/lib/docker/volumes/demo-volume/_data",
+        "Name": "demo-volume",
+        "Options": null,
+        "Scope": "local"
+    }
+]
+
+$ docker volume ls
+DRIVER    VOLUME NAME
+local     9753a08a7188bd1002a69a77962e3eb94527b34ee8d0792be428fd06338b34f7
+local     booking_booking-prod-postgres-data
+local     demo-volume
+local     eda760a63e096913a6ea0f2f6aae7fbaa1027c157d34c4f11a9aa3288b39a3a4
+local     sst-mess_mess-pgdata
+
+ +------------------+---------------------------+----------------------------+
+ |                  | BIND MOUNT                | NAMED VOLUME               |
+ +------------------+---------------------------+----------------------------+
+ | Syntax           | -v /host/path:/in/ctr     | -v volname:/in/ctr         |
+ | Lives where      | any folder you choose     | /var/lib/docker/volumes    |
+ | Managed by       | you                       | Docker                     |
+ | Host can edit    | yes, directly             | not easily                 |
+ | Portable         | no (path must exist)      | yes                        |
+ | Typical use      | local development         | databases, production data |
+ +------------------+---------------------------+----------------------------+

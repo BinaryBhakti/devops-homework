@@ -1,0 +1,40 @@
+===================================================
+  11. REAL DATABASE CONNECTIVITY  (backend -> MySQL)
+===================================================
+-- Not just ping: a real SQL session across the backend-net bridge. --
+-- The DB was started with --default-authentication-plugin=mysql_native_password
+-- so the Alpine MariaDB client can authenticate against MySQL 8. --
+
+$ docker exec backend mariadb --skip-ssl -h database -u appuser -papppass -e 'SELECT VERSION(); SHOW DATABASES;'
+mysql_version
+8.0.46
+Database
+appdb
+information_schema
+performance_schema
+
+$ CREATE TABLE + INSERT + SELECT, all over the docker network
+id	name	course
+1	Hello Students	Docker Networking
+
+-- The host used above is the container NAME 'database', resolved by Docker DNS: --
+$ docker exec backend getent hosts database
+172.21.0.2        database  database
+
+-- Meanwhile the frontend still cannot reach the database at all: --
+$ docker exec frontend curl -s --max-time 5 telnet://database:3306
+connection failed - database is unreachable from frontend
+
+-- Final topology: --
+$ docker ps --format 'table {{.Names}}	{{.Image}}	{{.Status}}'
+NAMES      IMAGE           STATUS
+database   mysql:8.0       Up 24 seconds
+backend    alpine:latest   Up 2 minutes
+frontend   nginx:alpine    Up 2 minutes
+
+$ docker network inspect frontend-net --format '{{.Name}}: {{range .Containers}}{{.Name}} {{end}}'
+frontend-net: backend frontend 
+$ docker network inspect backend-net --format '{{.Name}}: {{range .Containers}}{{.Name}} {{end}}'
+backend-net: backend database 
+$ docker network inspect mgmt-net --format '{{.Name}}: {{range .Containers}}{{.Name}} {{end}}'
+mgmt-net: 
