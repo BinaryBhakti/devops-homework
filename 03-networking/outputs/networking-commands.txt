@@ -1,0 +1,459 @@
+
+===================================================
+  1. ip addr  --  show interfaces and IP addresses
+===================================================
+$ ip addr show
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+2: tunl0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN group default qlen 1000
+    link/ipip 0.0.0.0 brd 0.0.0.0
+3: gre0@NONE: <NOARP> mtu 1476 qdisc noop state DOWN group default qlen 1000
+    link/gre 0.0.0.0 brd 0.0.0.0
+4: gretap0@NONE: <BROADCAST,MULTICAST> mtu 1462 qdisc noop state DOWN group default qlen 1000
+    link/ether 00:00:00:00:00:00 brd ff:ff:ff:ff:ff:ff
+5: erspan0@NONE: <BROADCAST,MULTICAST> mtu 1450 qdisc noop state DOWN group default qlen 1000
+    link/ether 00:00:00:00:00:00 brd ff:ff:ff:ff:ff:ff
+6: ip_vti0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN group default qlen 1000
+    link/ipip 0.0.0.0 brd 0.0.0.0
+7: ip6_vti0@NONE: <NOARP> mtu 1428 qdisc noop state DOWN group default qlen 1000
+    link/tunnel6 :: brd :: permaddr 6ebe:73fd:b2c8::
+8: sit0@NONE: <NOARP> mtu 1480 qdisc noop state DOWN group default qlen 1000
+    link/sit 0.0.0.0 brd 0.0.0.0
+9: ip6tnl0@NONE: <NOARP> mtu 1452 qdisc noop state DOWN group default qlen 1000
+    link/tunnel6 :: brd :: permaddr 4eb4:c424:ccfb::
+10: ip6gre0@NONE: <NOARP> mtu 1448 qdisc noop state DOWN group default qlen 1000
+    link/gre6 :: brd :: permaddr 6a0f:752b:6a91::
+11: eth0@if25: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 65535 qdisc noqueue state UP group default 
+    link/ether e6:85:22:bb:eb:ea brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 172.17.0.2/16 brd 172.17.255.255 scope global eth0
+       valid_lft forever preferred_lft forever
+
+$ ip -brief addr show
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+tunl0@NONE       DOWN           
+gre0@NONE        DOWN           
+gretap0@NONE     DOWN           
+erspan0@NONE     DOWN           
+ip_vti0@NONE     DOWN           
+ip6_vti0@NONE    DOWN           
+sit0@NONE        DOWN           
+ip6tnl0@NONE     DOWN           
+ip6gre0@NONE     DOWN           
+eth0@if25        UP             172.17.0.2/16 
+
+$ ip -4 addr show eth0
+11: eth0@if25: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 65535 qdisc noqueue state UP group default  link-netnsid 0
+    inet 172.17.0.2/16 brd 172.17.255.255 scope global eth0
+       valid_lft forever preferred_lft forever
+
+$ hostname -I
+172.17.0.2 
+
+
+===================================================
+  2. ifconfig  --  the older (net-tools) equivalent of 'ip addr'
+===================================================
+$ ifconfig
+eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 65535
+        inet 172.17.0.2  netmask 255.255.0.0  broadcast 172.17.255.255
+        ether e6:85:22:bb:eb:ea  txqueuelen 0  (Ethernet)
+        RX packets 5779  bytes 52465504 (52.4 MB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 4324  bytes 300111 (300.1 KB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
+        inet 127.0.0.1  netmask 255.0.0.0
+        inet6 ::1  prefixlen 128  scopeid 0x10<host>
+        loop  txqueuelen 1000  (Local Loopback)
+        RX packets 66  bytes 6846 (6.8 KB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 66  bytes 6846 (6.8 KB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+
+$ ifconfig eth0
+eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 65535
+        inet 172.17.0.2  netmask 255.255.0.0  broadcast 172.17.255.255
+        ether e6:85:22:bb:eb:ea  txqueuelen 0  (Ethernet)
+        RX packets 5779  bytes 52465504 (52.4 MB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 4324  bytes 300111 (300.1 KB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+
+
+===================================================
+  3. ip route / route  --  the routing table (where packets go)
+===================================================
+$ ip route show
+default via 172.17.0.1 dev eth0 
+172.17.0.0/16 dev eth0 proto kernel scope link src 172.17.0.2 
+
+$ ip route get 8.8.8.8
+8.8.8.8 via 172.17.0.1 dev eth0 src 172.17.0.2 uid 0 
+    cache 
+
+$ route -n
+Kernel IP routing table
+Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+0.0.0.0         172.17.0.1      0.0.0.0         UG    0      0        0 eth0
+172.17.0.0      0.0.0.0         255.255.0.0     U     0      0        0 eth0
+
+$ ip -brief link show
+lo               UNKNOWN        00:00:00:00:00:00 <LOOPBACK,UP,LOWER_UP> 
+tunl0@NONE       DOWN           0.0.0.0 <NOARP> 
+gre0@NONE        DOWN           0.0.0.0 <NOARP> 
+gretap0@NONE     DOWN           00:00:00:00:00:00 <BROADCAST,MULTICAST> 
+erspan0@NONE     DOWN           00:00:00:00:00:00 <BROADCAST,MULTICAST> 
+ip_vti0@NONE     DOWN           0.0.0.0 <NOARP> 
+ip6_vti0@NONE    DOWN           :: <NOARP> 
+sit0@NONE        DOWN           0.0.0.0 <NOARP> 
+ip6tnl0@NONE     DOWN           :: <NOARP> 
+ip6gre0@NONE     DOWN           :: <NOARP> 
+eth0@if25        UP             e6:85:22:bb:eb:ea <BROADCAST,MULTICAST,UP,LOWER_UP> 
+
+
+===================================================
+  4. ping  --  is the host reachable? (ICMP echo)
+===================================================
+$ ping -c 4 127.0.0.1
+PING 127.0.0.1 (127.0.0.1) 56(84) bytes of data.
+64 bytes from 127.0.0.1: icmp_seq=1 ttl=64 time=0.057 ms
+64 bytes from 127.0.0.1: icmp_seq=2 ttl=64 time=0.078 ms
+64 bytes from 127.0.0.1: icmp_seq=3 ttl=64 time=0.078 ms
+64 bytes from 127.0.0.1: icmp_seq=4 ttl=64 time=0.117 ms
+
+--- 127.0.0.1 ping statistics ---
+4 packets transmitted, 4 received, 0% packet loss, time 3053ms
+rtt min/avg/max/mdev = 0.057/0.082/0.117/0.021 ms
+
+$ ping -c 4 8.8.8.8
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=63 time=353 ms
+64 bytes from 8.8.8.8: icmp_seq=2 ttl=63 time=86.5 ms
+64 bytes from 8.8.8.8: icmp_seq=3 ttl=63 time=122 ms
+64 bytes from 8.8.8.8: icmp_seq=4 ttl=63 time=79.5 ms
+
+--- 8.8.8.8 ping statistics ---
+4 packets transmitted, 4 received, 0% packet loss, time 3018ms
+rtt min/avg/max/mdev = 79.500/160.251/353.155/112.527 ms
+
+$ ping -c 4 google.com
+PING google.com (172.217.24.174) 56(84) bytes of data.
+64 bytes from lcmaaa-bc-in-f14.1e100.net (172.217.24.174): icmp_seq=1 ttl=63 time=72.3 ms
+64 bytes from lcmaaa-bc-in-f14.1e100.net (172.217.24.174): icmp_seq=2 ttl=63 time=90.4 ms
+64 bytes from lcmaaa-bc-in-f14.1e100.net (172.217.24.174): icmp_seq=3 ttl=63 time=142 ms
+64 bytes from lcmaaa-bc-in-f14.1e100.net (172.217.24.174): icmp_seq=4 ttl=63 time=83.2 ms
+
+--- google.com ping statistics ---
+4 packets transmitted, 4 received, 0% packet loss, time 3016ms
+rtt min/avg/max/mdev = 72.302/97.040/142.285/26.904 ms
+
+
+===================================================
+  5. traceroute / mtr  --  what path do packets take?
+===================================================
+$ traceroute -m 8 -w 2 8.8.8.8
+traceroute to 8.8.8.8 (8.8.8.8), 8 hops max, 60 byte packets
+ 1  172.17.0.1 (172.17.0.1)  0.655 ms  0.024 ms  0.029 ms
+ 2  * * *
+ 3  * * *
+ 4  * * *
+ 5  * * *
+ 6  * * *
+ 7  * * *
+ 8  * * *
+
+$ mtr -r -c 3 8.8.8.8
+Start: 2026-09-03T05:10:52+0000
+HOST: ff4c4be986b8                Loss%   Snt   Last   Avg  Best  Wrst StDev
+  1.|-- 172.17.0.1                 0.0%     3    0.4   0.4   0.2   0.5   0.1
+  2.|-- dns.google                 0.0%     3  109.0 128.3 109.0 160.9  28.4
+
+
+===================================================
+  6. DNS lookups  --  nslookup, dig, host
+===================================================
+$ nslookup github.com
+Server:		192.168.65.7
+Address:	192.168.65.7#53
+
+Non-authoritative answer:
+Name:	github.com
+Address: 20.207.73.82
+
+
+$ dig github.com +short
+20.207.73.82
+
+$ dig github.com
+
+; <<>> DiG 9.18.39-0ubuntu0.24.04.7-Ubuntu <<>> github.com
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 19665
+;; flags: qr rd ra; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 0
+
+;; QUESTION SECTION:
+;github.com.			IN	A
+
+;; ANSWER SECTION:
+github.com.		40	IN	A	20.207.73.82
+
+;; Query time: 3 msec
+;; SERVER: 192.168.65.7#53(192.168.65.7) (UDP)
+;; WHEN: Thu Sep 03 05:11:01 UTC 2026
+;; MSG SIZE  rcvd: 54
+
+
+$ dig google.com MX +short
+10 smtp.google.com.
+
+$ dig -x 8.8.8.8 +short
+dns.google.
+
+$ host github.com
+github.com has address 20.207.73.82
+github.com mail is handled by 0 github-com.mail.protection.outlook.com.
+
+$ cat /etc/resolv.conf
+# Generated by Docker Engine.
+# This file can be edited; Docker Engine will not make further changes once it
+# has been modified.
+
+nameserver 192.168.65.7
+
+# Based on host file: '/etc/resolv.conf' (legacy)
+# Overrides: []
+
+$ cat /etc/hosts
+127.0.0.1	localhost
+::1	localhost ip6-localhost ip6-loopback
+fe00::	ip6-localnet
+ff00::	ip6-mcastprefix
+ff02::1	ip6-allnodes
+ff02::2	ip6-allrouters
+172.17.0.2	ff4c4be986b8
+
+
+===================================================
+  7. ss / netstat  --  which ports are open and who is listening?
+===================================================
+$ ss -tuln
+Netid State  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess
+tcp   LISTEN 0      511          0.0.0.0:80        0.0.0.0:*          
+tcp   LISTEN 0      511             [::]:80           [::]:*          
+
+$ ss -tulnp
+Netid State  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess                                                                                                                                                                                                                         
+tcp   LISTEN 0      511          0.0.0.0:80        0.0.0.0:*    users:(("nginx",pid=1070,fd=5),("nginx",pid=1069,fd=5),("nginx",pid=1068,fd=5),("nginx",pid=1067,fd=5),("nginx",pid=1065,fd=5),("nginx",pid=1064,fd=5),("nginx",pid=1063,fd=5),("nginx",pid=1062,fd=5),("nginx",pid=1061,fd=5))
+tcp   LISTEN 0      511             [::]:80           [::]:*    users:(("nginx",pid=1070,fd=6),("nginx",pid=1069,fd=6),("nginx",pid=1068,fd=6),("nginx",pid=1067,fd=6),("nginx",pid=1065,fd=6),("nginx",pid=1064,fd=6),("nginx",pid=1063,fd=6),("nginx",pid=1062,fd=6),("nginx",pid=1061,fd=6))
+
+$ ss -s
+Total: 56
+TCP:   66 (estab 0, closed 64, orphaned 0, timewait 1)
+
+Transport Total     IP        IPv6
+RAW	  0         0         0        
+UDP	  0         0         0        
+TCP	  2         1         1        
+INET	  2         1         1        
+FRAG	  0         0         0        
+
+
+$ netstat -tuln
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State      
+tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN     
+tcp6       0      0 :::80                   :::*                    LISTEN     
+
+$ netstat -i
+Kernel Interface table
+Iface             MTU    RX-OK RX-ERR RX-DRP RX-OVR    TX-OK TX-ERR TX-DRP TX-OVR Flg
+eth0            65535     5813      0      0 0          4379      0      0      0 BMRU
+lo              65536       74      0      0 0            74      0      0      0 LRU
+
+$ netstat -rn
+Kernel IP routing table
+Destination     Gateway         Genmask         Flags   MSS Window  irtt Iface
+0.0.0.0         172.17.0.1      0.0.0.0         UG        0 0          0 eth0
+172.17.0.0      0.0.0.0         255.255.0.0     U         0 0          0 eth0
+
+
+===================================================
+  8. curl / wget  --  make HTTP requests
+===================================================
+$ curl -s -o /dev/null -w 'HTTP status: %{http_code}\nTotal time: %{time_total}s\nRemote IP: %{remote_ip}\n' https://github.com
+HTTP status: 200
+Total time: 1.572165s
+Remote IP: 20.207.73.82
+
+$ curl -I https://api.github.com
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0  2396    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+HTTP/2 200 
+date: Thu, 03 Sep 2026 05:10:51 GMT
+cache-control: public, max-age=60, s-maxage=60
+vary: Accept,Accept-Encoding, Accept, X-Requested-With
+x-github-api-version-selected: 2022-11-28
+access-control-expose-headers: ETag, Link, Location, Retry-After, X-GitHub-OTP, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Used, X-RateLimit-Resource, X-RateLimit-Reset, X-OAuth-Scopes, X-Accepted-OAuth-Scopes, X-Poll-Interval, X-GitHub-Media-Type, X-GitHub-SSO, X-GitHub-Request-Id, Deprecation, Sunset, Warning
+access-control-allow-origin: *
+strict-transport-security: max-age=31536000; includeSubdomains; preload
+x-frame-options: deny
+x-content-type-options: nosniff
+x-xss-protection: 0
+referrer-policy: origin-when-cross-origin, strict-origin-when-cross-origin
+content-security-policy: default-src 'none'
+server: github.com
+content-type: application/json; charset=utf-8
+x-github-media-type: github.v3; format=json
+etag: W/"4f825cc84e1c733059d46e76e6df9db557ae5254f9625dfe8e1b09499c449438"
+accept-ranges: bytes
+x-ratelimit-limit: 60
+x-ratelimit-remaining: 56
+x-ratelimit-used: 4
+x-ratelimit-resource: core
+x-ratelimit-reset: 1788413435
+content-length: 2396
+x-github-request-id: F5AC:29BBAD:30CFA2:3608B8:6A990167
+x-github-edge-region: centralindia
+
+
+$ curl -s https://api.github.com/zen
+Approachable is better than simple.
+$ curl -s ifconfig.me; echo
+106.192.251.38
+
+$ wget -q -O - https://api.github.com/zen; echo
+Approachable is better than simple.
+
+
+===================================================
+  9. nc (netcat)  --  test whether a TCP port is open
+===================================================
+$ nc -zv github.com 443
+Connection to github.com (20.207.73.82) 443 port [tcp/https] succeeded!
+
+$ nc -zv github.com 80
+Connection to github.com (20.207.73.82) 80 port [tcp/http] succeeded!
+
+$ nc -zv -w 3 github.com 12345
+nc: connect to github.com (20.207.73.82) port 12345 (tcp) timed out: Operation now in progress
+
+$ nc -zv 127.0.0.1 80
+Connection to 127.0.0.1 80 port [tcp/http] succeeded!
+
+
+===================================================
+  10. arp  --  IP-to-MAC address table (layer 2)
+===================================================
+$ arp -n
+Address                  HWtype  HWaddress           Flags Mask            Iface
+172.17.0.1               ether   62:e5:3a:24:1e:65   C                     eth0
+
+$ ip neigh show
+172.17.0.1 dev eth0 lladdr 62:e5:3a:24:1e:65 REACHABLE 
+
+
+===================================================
+  11. Interface details and statistics
+===================================================
+$ ip -s link show eth0
+11: eth0@if25: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 65535 qdisc noqueue state UP mode DEFAULT group default 
+    link/ether e6:85:22:bb:eb:ea brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    RX:  bytes packets errors dropped  missed   mcast           
+      53075865    5933      0       0       0       0 
+    TX:  bytes packets errors dropped carrier collsns           
+        315731    4502      0       0       0       0 
+
+$ ethtool eth0 2>&1 | head -12
+Settings for eth0:
+	Supported ports: [  ]
+	Supported link modes:   Not reported
+	Supported pause frame use: No
+	Supports auto-negotiation: No
+	Supported FEC modes: Not reported
+	Advertised link modes:  Not reported
+	Advertised pause frame use: No
+	Advertised auto-negotiation: No
+	Advertised FEC modes: Not reported
+	Speed: 10000Mb/s
+	Duplex: Full
+
+$ cat /sys/class/net/eth0/address
+e6:85:22:bb:eb:ea
+
+$ cat /sys/class/net/eth0/mtu
+65535
+
+
+===================================================
+  12. tcpdump  --  capture live packets
+===================================================
+$ tcpdump -i eth0 -c 5 -nn icmp & sleep 1; ping -c 3 8.8.8.8 >/dev/null 2>&1; wait
+tcpdump: verbose output suppressed, use -v[v]... for full protocol decode
+listening on eth0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+05:11:12.740849 IP 172.17.0.2 > 8.8.8.8: ICMP echo request, id 35081, seq 1, length 64
+05:11:13.159566 IP 8.8.8.8 > 172.17.0.2: ICMP echo reply, id 35081, seq 1, length 64
+05:11:13.747145 IP 172.17.0.2 > 8.8.8.8: ICMP echo request, id 35081, seq 2, length 64
+05:11:13.904628 IP 8.8.8.8 > 172.17.0.2: ICMP echo reply, id 35081, seq 2, length 64
+05:11:14.753833 IP 172.17.0.2 > 8.8.8.8: ICMP echo request, id 35081, seq 3, length 64
+5 packets captured
+6 packets received by filter
+0 packets dropped by kernel
+
+
+===================================================
+  13. whois  --  who owns a domain?
+===================================================
+$ whois github.com 2>&1 | grep -iE 'domain name|registrar:|creation date|expir|name server' | head -10
+   Domain Name: GITHUB.COM
+   Creation Date: 2007-10-09T18:20:50Z
+   Registry Expiry Date: 2026-10-09T18:20:50Z
+   Registrar: MarkMonitor Inc.
+   Name Server: DNS1.P08.NSONE.NET
+   Name Server: DNS2.P08.NSONE.NET
+   Name Server: DNS3.P08.NSONE.NET
+   Name Server: DNS4.P08.NSONE.NET
+   Name Server: NS-1283.AWSDNS-32.ORG
+   Name Server: NS-1707.AWSDNS-21.CO.UK
+
+
+===================================================
+  14. Local web server test (nginx is running in this container)
+===================================================
+$ systemctl is-active nginx
+active
+
+$ curl -s http://localhost | head -8
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+html { color-scheme: light dark; }
+body { width: 35em; margin: 0 auto;
+font-family: Tahoma, Verdana, Arial, sans-serif; }
+
+$ curl -sI http://localhost
+HTTP/1.1 200 OK
+Server: nginx/1.24.0 (Ubuntu)
+Date: Thu, 03 Sep 2026 05:11:18 GMT
+Content-Type: text/html
+Content-Length: 615
+Last-Modified: Thu, 03 Sep 2026 04:19:23 GMT
+Connection: keep-alive
+ETag: "6a98f54b-267"
+Accept-Ranges: bytes
+
+
+$ ss -tlnp | grep :80
+LISTEN 0      511          0.0.0.0:80        0.0.0.0:*    users:(("nginx",pid=1070,fd=5),("nginx",pid=1069,fd=5),("nginx",pid=1068,fd=5),("nginx",pid=1067,fd=5),("nginx",pid=1065,fd=5),("nginx",pid=1064,fd=5),("nginx",pid=1063,fd=5),("nginx",pid=1062,fd=5),("nginx",pid=1061,fd=5))
+LISTEN 0      511             [::]:80           [::]:*    users:(("nginx",pid=1070,fd=6),("nginx",pid=1069,fd=6),("nginx",pid=1068,fd=6),("nginx",pid=1067,fd=6),("nginx",pid=1065,fd=6),("nginx",pid=1064,fd=6),("nginx",pid=1063,fd=6),("nginx",pid=1062,fd=6),("nginx",pid=1061,fd=6))
+
