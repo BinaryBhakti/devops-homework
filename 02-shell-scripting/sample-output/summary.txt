@@ -1,0 +1,17 @@
+===== SYSTEM SUMMARY =====
+Generated on : 2026-09-03 at 04:34:01
+Hostname     : ff4c4be986b8
+Username     : root
+Kernel       : Linux 7.0.12-linuxkit aarch64
+Name         : Ashmit Nayak
+Roll Number  : 2024-DEVOPS-001
+Comment      : Session 3 shell scripting homework
+
+----- Disk Usage -----
+Filesystem      Size  Used Avail Use% Mounted on
+overlay         224G  2.6G  210G   2% /
+tmpfs            64M     0   64M   0% /dev
+shm              64M     0   64M   0% /dev/shm
+tmpfs           2.0G   36K  2.0G   1% /run
+tmpfs           2.0G     0  2.0G   0% /run/lock
+/dev/vda1       224G  2.6G  210G   2% /etc/hosts

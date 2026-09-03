@@ -1,0 +1,93 @@
+===========================================================
+               SYSTEM INFORMATION REPORT
+===========================================================
+
+Current Date & Time : Thu Sep  3 04:34:01 UTC 2026
+Hostname            : ff4c4be986b8
+Username            : root
+Kernel              : Linux 7.0.12-linuxkit aarch64
+Uptime              : up 4 days, 7 hours, 49 minutes
+
+-----------------------------------------------------------
+  DISK USAGE  (df -h)
+-----------------------------------------------------------
+Filesystem      Size  Used Avail Use% Mounted on
+overlay         224G  2.6G  210G   2% /
+tmpfs            64M     0   64M   0% /dev
+shm              64M     0   64M   0% /dev/shm
+tmpfs           2.0G   36K  2.0G   1% /run
+tmpfs           2.0G     0  2.0G   0% /run/lock
+/dev/vda1       224G  2.6G  210G   2% /etc/hosts
+
+-----------------------------------------------------------
+  RUNNING PROCESSES  (ps aux | head -10)
+-----------------------------------------------------------
+USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+root           1  0.0  0.2  20968 11696 ?        Ss   04:19   0:00 /sbin/init
+root          23  0.0  0.2  33636 11420 ?        S<s  04:19   0:00 /usr/lib/systemd/systemd-journald
+message+      71  0.0  0.0   8404  3972 ?        Ss   04:19   0:00 @dbus-daemon --system --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+root          74  0.0  0.1  17204  7172 ?        Ss   04:19   0:00 /usr/lib/systemd/systemd-logind
+root          77  0.0  0.0   2700  1716 tty1     Ss+  04:19   0:00 /sbin/agetty -o -p -- \u --noclear - linux
+root        1061  0.0  0.0  10380  1548 ?        Ss   04:26   0:00 nginx: master process /usr/sbin/nginx -g daemon on; master_process on;
+www-data    1062  0.0  0.0  10752  3360 ?        S    04:26   0:00 nginx: worker process
+www-data    1063  0.0  0.0  10752  3360 ?        S    04:26   0:00 nginx: worker process
+www-data    1064  0.0  0.0  10752  2908 ?        S    04:26   0:00 nginx: worker process
+
+-----------------------------------------------------------
+  USER INPUT
+-----------------------------------------------------------
+
+My name is        : Ashmit Nayak
+My roll number is : 2024-DEVOPS-001
+My comment is     : Session 3 shell scripting homework
+
+-----------------------------------------------------------
+  CREATING OUTPUT FILES
+-----------------------------------------------------------
+[+] Directory created : sysinfo_report
+[+] File created      : sysinfo_report/process.log
+[+] File created      : sysinfo_report/summary.txt
+
+[+] Running processes saved to sysinfo_report/process.log using > redirection
+[+] Summary saved to sysinfo_report/summary.txt
+
+-----------------------------------------------------------
+  VERIFICATION
+-----------------------------------------------------------
+$ ls -l sysinfo_report
+total 8
+-rw-r--r-- 1 root root 1943 Sep  3 04:34 process.log
+-rw-r--r-- 1 root root  610 Sep  3 04:34 summary.txt
+
+$ wc -l sysinfo_report/process.log
+18 sysinfo_report/process.log
+
+$ head -5 sysinfo_report/process.log
+USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+root           1  0.0  0.2  20968 11696 ?        Ss   04:19   0:00 /sbin/init
+root          23  0.0  0.2  33636 11420 ?        S<s  04:19   0:00 /usr/lib/systemd/systemd-journald
+message+      71  0.0  0.0   8404  3972 ?        Ss   04:19   0:00 @dbus-daemon --system --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+root          74  0.0  0.1  17204  7172 ?        Ss   04:19   0:00 /usr/lib/systemd/systemd-logind
+
+$ cat sysinfo_report/summary.txt
+===== SYSTEM SUMMARY =====
+Generated on : 2026-09-03 at 04:34:01
+Hostname     : ff4c4be986b8
+Username     : root
+Kernel       : Linux 7.0.12-linuxkit aarch64
+Name         : Ashmit Nayak
+Roll Number  : 2024-DEVOPS-001
+Comment      : Session 3 shell scripting homework
+
+----- Disk Usage -----
+Filesystem      Size  Used Avail Use% Mounted on
+overlay         224G  2.6G  210G   2% /
+tmpfs            64M     0   64M   0% /dev
+shm              64M     0   64M   0% /dev/shm
+tmpfs           2.0G   36K  2.0G   1% /run
+tmpfs           2.0G     0  2.0G   0% /run/lock
+/dev/vda1       224G  2.6G  210G   2% /etc/hosts
+
+===========================================================
+  Script completed successfully.
+===========================================================
