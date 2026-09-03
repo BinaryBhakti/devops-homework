@@ -1,0 +1,417 @@
+
+===================================================
+  SETUP: create a fresh repository
+===================================================
+$ git init -b main
+Initialized empty Git repository in /private/tmp/git-lab/.git/
+
+$ git config user.name 'BinaryBhakti'
+
+$ git config user.email 'ashmitknayak@gmail.com'
+
+###################################################################
+#  TASK 1:  git commit -m   vs   git commit -a -m
+###################################################################
+
+===================================================
+  1a. First commit -- a brand new file MUST be staged with git add
+===================================================
+$ echo 'v1: initial content' > file1.txt
+
+$ git status --short
+?? file1.txt
+
+-- '??' means UNTRACKED. git commit -a will NOT pick this up: --
+$ git commit -a -m 'try to commit an untracked file with -a'
+On branch main
+
+Initial commit
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	file1.txt
+
+nothing added to commit but untracked files present (use "git add" to track)
+
+-- Nothing was committed. Untracked files are invisible to -a. --
+$ git add file1.txt
+
+$ git status --short
+A  file1.txt
+
+-- 'A' means staged/Added. Now it can be committed: --
+$ git commit -m 'C1: add file1.txt'
+[main (root-commit) f424497] C1: add file1.txt
+ 1 file changed, 1 insertion(+)
+ create mode 100644 file1.txt
+
+$ git log --oneline
+f424497 C1: add file1.txt
+
+
+===================================================
+  1b. Modify a TRACKED file -- now compare the two commands
+===================================================
+$ echo 'v2: modified content' >> file1.txt
+
+$ cat file1.txt
+v1: initial content
+v2: modified content
+
+$ git status --short
+ M file1.txt
+
+-- ' M' (space then M) = modified in WORKING DIRECTORY but NOT staged --
+
+-- Try plain 'git commit -m' with nothing staged: --
+$ git commit -m 'C2: plain commit with nothing staged'
+On branch main
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   file1.txt
+
+no changes added to commit (use "git add" and/or "git commit -a")
+
+-- It REFUSED: 'no changes added to commit'. --
+
+-- Now the same situation with -a, which auto-stages tracked files: --
+$ git commit -a -m 'C2: modify file1.txt using commit -a -m'
+[main 35b40f7] C2: modify file1.txt using commit -a -m
+ 1 file changed, 1 insertion(+)
+
+$ git log --oneline
+35b40f7 C2: modify file1.txt using commit -a -m
+f424497 C1: add file1.txt
+
+$ git status --short
+
+-- Working tree is clean. -a did 'git add' for us on TRACKED files. --
+
+===================================================
+  1c. Side-by-side proof with a tracked file AND an untracked file
+===================================================
+$ echo 'v3: third change' >> file1.txt
+
+$ echo 'brand new, never tracked' > file2_untracked.txt
+
+$ git status --short
+ M file1.txt
+?? file2_untracked.txt
+
+-- ' M file1.txt'  = tracked + modified  -> -a WILL commit it
+-- '?? file2_untracked.txt' = untracked  -> -a will IGNORE it
+
+$ git commit -a -m 'C3: -a picks up file1 but ignores the untracked file'
+[main cee8e3f] C3: -a picks up file1 but ignores the untracked file
+ 1 file changed, 1 insertion(+)
+
+$ git show --stat --oneline HEAD
+cee8e3f C3: -a picks up file1 but ignores the untracked file
+ file1.txt | 1 +
+ 1 file changed, 1 insertion(+)
+
+$ git status --short
+?? file2_untracked.txt
+
+-- Confirmed: file2_untracked.txt is STILL untracked after commit -a. --
+$ git add file2_untracked.txt && git commit -m 'C4: explicitly add and commit file2'
+[main cd85ff7] C4: explicitly add and commit file2
+ 1 file changed, 1 insertion(+)
+ create mode 100644 file2_untracked.txt
+
+$ git status --short
+
+$ git log --oneline
+cd85ff7 C4: explicitly add and commit file2
+cee8e3f C3: -a picks up file1 but ignores the untracked file
+35b40f7 C2: modify file1.txt using commit -a -m
+f424497 C1: add file1.txt
+
+
+===================================================
+  1d. What about a DELETED tracked file?
+===================================================
+$ echo 'delete me later' > file3.txt && git add file3.txt && git commit -m 'C5: add file3.txt'
+[main 4004748] C5: add file3.txt
+ 1 file changed, 1 insertion(+)
+ create mode 100644 file3.txt
+
+$ rm file3.txt
+
+$ git status --short
+ D file3.txt
+
+-- ' D' = deleted in working tree, deletion not staged --
+$ git commit -a -m 'C6: -a also stages DELETIONS of tracked files'
+[main b0fc8b5] C6: -a also stages DELETIONS of tracked files
+ 1 file changed, 1 deletion(-)
+ delete mode 100644 file3.txt
+
+$ git status --short
+
+$ git log --oneline
+b0fc8b5 C6: -a also stages DELETIONS of tracked files
+4004748 C5: add file3.txt
+cd85ff7 C4: explicitly add and commit file2
+cee8e3f C3: -a picks up file1 but ignores the untracked file
+35b40f7 C2: modify file1.txt using commit -a -m
+f424497 C1: add file1.txt
+
+
+===================================================
+  1e. SUMMARY TABLE
+===================================================
+ +------------------------+---------------------+------------------------+
+ | Change type            | git commit -m       | git commit -a -m       |
+ +------------------------+---------------------+------------------------+
+ | New / untracked file   | needs git add first | IGNORED (needs add)    |
+ | Modified tracked file  | needs git add first | auto-staged  [OK]      |
+ | Deleted tracked file   | needs git add/rm    | auto-staged  [OK]      |
+ | Staged changes         | commits them        | commits them           |
+ +------------------------+---------------------+------------------------+
+   -a  ==  "git add -u"  (update tracked files)  +  "git commit"
+
+###################################################################
+#  TASK 2:  git cherry-pick
+###################################################################
+
+===================================================
+  2a. Build up 4 commits on main
+===================================================
+$ rm -rf /tmp/git-lab2 && mkdir -p /tmp/git-lab2
+
+$ git init -b main
+Initialized empty Git repository in /private/tmp/git-lab2/.git/
+
+$ git config user.name 'BinaryBhakti'
+
+$ git config user.email 'ashmitknayak@gmail.com'
+
+$ echo '# My Project' > README.md && git add . && git commit -m 'M1: initial commit with README'
+[main (root-commit) 3987539] M1: initial commit with README
+ 1 file changed, 1 insertion(+)
+ create mode 100644 README.md
+
+$ echo 'body { margin: 0; }' > style.css && git add . && git commit -m 'M2: add stylesheet'
+[main fe03ebd] M2: add stylesheet
+ 1 file changed, 1 insertion(+)
+ create mode 100644 style.css
+
+$ echo 'console.log("app");' > app.js && git add . && git commit -m 'M3: add app.js'
+[main 3305b2a] M3: add app.js
+ 1 file changed, 1 insertion(+)
+ create mode 100644 app.js
+
+$ echo 'node_modules/' > .gitignore && git add . && git commit -m 'M4: add gitignore'
+[main fc62b41] M4: add gitignore
+ 1 file changed, 1 insertion(+)
+ create mode 100644 .gitignore
+
+
+===================================================
+  2b. View the commits on main with git log
+===================================================
+$ git log --oneline
+fc62b41 M4: add gitignore
+3305b2a M3: add app.js
+fe03ebd M2: add stylesheet
+3987539 M1: initial commit with README
+
+$ git log --oneline --graph --decorate
+* fc62b41 (HEAD -> main) M4: add gitignore
+* 3305b2a M3: add app.js
+* fe03ebd M2: add stylesheet
+* 3987539 M1: initial commit with README
+
+$ git log --pretty=format:'%h | %an | %ar | %s' && echo
+fc62b41 | BinaryBhakti | 0 seconds ago | M4: add gitignore
+3305b2a | BinaryBhakti | 0 seconds ago | M3: add app.js
+fe03ebd | BinaryBhakti | 0 seconds ago | M2: add stylesheet
+3987539 | BinaryBhakti | 0 seconds ago | M1: initial commit with README
+
+
+===================================================
+  2c. Create a new branch and add 3 commits to it
+===================================================
+$ git checkout -b feature-branch
+Switched to a new branch 'feature-branch'
+
+$ git branch
+* feature-branch
+  main
+
+$ echo 'function login() {}' > auth.js && git add . && git commit -m 'F1: add authentication module'
+[feature-branch 70844d3] F1: add authentication module
+ 1 file changed, 1 insertion(+)
+ create mode 100644 auth.js
+
+$ echo 'CRITICAL BUGFIX: fixed null pointer' > bugfix.txt && git add . && git commit -m 'F2: HOTFIX - fix null pointer crash'
+[feature-branch fa73f70] F2: HOTFIX - fix null pointer crash
+ 1 file changed, 1 insertion(+)
+ create mode 100644 bugfix.txt
+
+$ echo '<h1>New Dashboard</h1>' > dashboard.html && git add . && git commit -m 'F3: add dashboard page (not ready for main)'
+[feature-branch 07c2511] F3: add dashboard page (not ready for main)
+ 1 file changed, 1 insertion(+)
+ create mode 100644 dashboard.html
+
+
+===================================================
+  2d. Use git log to identify the SPECIFIC commit we want
+===================================================
+$ git log --oneline
+07c2511 F3: add dashboard page (not ready for main)
+fa73f70 F2: HOTFIX - fix null pointer crash
+70844d3 F1: add authentication module
+fc62b41 M4: add gitignore
+3305b2a M3: add app.js
+fe03ebd M2: add stylesheet
+3987539 M1: initial commit with README
+
+-- We want ONLY 'F2: HOTFIX' on main. We do NOT want F1 or F3. --
+$ git log --oneline --grep='HOTFIX'
+fa73f70 F2: HOTFIX - fix null pointer crash
+
+Full SHA of the commit to cherry-pick: fa73f70feb445e32c2b669f1d4d258ccc1f506be
+Short SHA: fa73f70
+
+$ git show --stat fa73f70feb445e32c2b669f1d4d258ccc1f506be
+commit fa73f70feb445e32c2b669f1d4d258ccc1f506be
+Author: BinaryBhakti <ashmitknayak@gmail.com>
+Date:   Thu Sep 3 10:06:24 2026 +0530
+
+    F2: HOTFIX - fix null pointer crash
+
+ bugfix.txt | 1 +
+ 1 file changed, 1 insertion(+)
+
+
+===================================================
+  2e. Compare the two branches BEFORE the cherry-pick
+===================================================
+$ git checkout main
+Switched to branch 'main'
+
+$ ls -1
+README.md
+app.js
+style.css
+
+-- main does NOT have auth.js, bugfix.txt or dashboard.html --
+$ git log --oneline --all --graph --decorate
+* 07c2511 (feature-branch) F3: add dashboard page (not ready for main)
+* fa73f70 F2: HOTFIX - fix null pointer crash
+* 70844d3 F1: add authentication module
+* fc62b41 (HEAD -> main) M4: add gitignore
+* 3305b2a M3: add app.js
+* fe03ebd M2: add stylesheet
+* 3987539 M1: initial commit with README
+
+
+===================================================
+  2f. THE CHERRY-PICK  --  bring just that one commit into main
+===================================================
+$ git cherry-pick fa73f70feb445e32c2b669f1d4d258ccc1f506be
+[main b6ce554] F2: HOTFIX - fix null pointer crash
+ Date: Thu Sep 3 10:06:24 2026 +0530
+ 1 file changed, 1 insertion(+)
+ create mode 100644 bugfix.txt
+
+
+===================================================
+  2g. VERIFY the change is now on main
+===================================================
+$ git log --oneline
+b6ce554 F2: HOTFIX - fix null pointer crash
+fc62b41 M4: add gitignore
+3305b2a M3: add app.js
+fe03ebd M2: add stylesheet
+3987539 M1: initial commit with README
+
+-- Note: F2 appears on main with a NEW hash (it is a copy, not a move) --
+$ ls -1
+README.md
+app.js
+bugfix.txt
+style.css
+
+$ cat bugfix.txt
+CRITICAL BUGFIX: fixed null pointer
+
+-- bugfix.txt is present on main. --
+
+-- And F1 / F3 did NOT come along: --
+$ test -f auth.js && echo 'auth.js present (WRONG)' || echo 'auth.js absent (CORRECT)'
+auth.js absent (CORRECT)
+
+$ test -f dashboard.html && echo 'dashboard.html present (WRONG)' || echo 'dashboard.html absent (CORRECT)'
+dashboard.html absent (CORRECT)
+
+
+===================================================
+  2h. The full picture
+===================================================
+$ git log --oneline --all --graph --decorate
+* 07c2511 (feature-branch) F3: add dashboard page (not ready for main)
+* fa73f70 F2: HOTFIX - fix null pointer crash
+* 70844d3 F1: add authentication module
+| * b6ce554 (HEAD -> main) F2: HOTFIX - fix null pointer crash
+|/  
+* fc62b41 M4: add gitignore
+* 3305b2a M3: add app.js
+* fe03ebd M2: add stylesheet
+* 3987539 M1: initial commit with README
+
+$ git branch -v
+  feature-branch 07c2511 F3: add dashboard page (not ready for main)
+* main           b6ce554 F2: HOTFIX - fix null pointer crash
+
+-- Same content, different SHAs (cherry-pick REPLAYS the diff): --
+$ git log --format='%h %s' -1 main
+b6ce554 F2: HOTFIX - fix null pointer crash
+
+$ git log --format='%h %s' --grep='HOTFIX' feature-branch
+fa73f70 F2: HOTFIX - fix null pointer crash
+
+$ git show --stat HEAD
+commit b6ce554af2fb604aa9395f887f0ed27526cd955f
+Author: BinaryBhakti <ashmitknayak@gmail.com>
+Date:   Thu Sep 3 10:06:24 2026 +0530
+
+    F2: HOTFIX - fix null pointer crash
+
+ bugfix.txt | 1 +
+ 1 file changed, 1 insertion(+)
+
+
+===================================================
+  2i. Useful cherry-pick variants (reference)
+===================================================
+  git cherry-pick <sha>              # apply one commit
+  git cherry-pick <sha1> <sha2>      # apply several commits
+  git cherry-pick <sha1>..<sha2>     # apply a RANGE (exclusive of sha1)
+  git cherry-pick <sha1>^..<sha2>    # apply a RANGE (inclusive of sha1)
+  git cherry-pick -n <sha>           # apply but do NOT commit (stage only)
+  git cherry-pick -x <sha>           # add "(cherry picked from ...)" to message
+  git cherry-pick --continue         # after resolving a conflict
+  git cherry-pick --abort            # cancel and go back
+  git cherry-pick --skip             # skip the current commit
+
+$ git cherry-pick -n $(git log --format=%H --grep='F1' feature-branch)
+
+$ git status --short
+A  auth.js
+
+$ git cherry-pick --abort 2>/dev/null || git reset --hard HEAD
+HEAD is now at b6ce554 F2: HOTFIX - fix null pointer crash
+
+$ git status --short
+
+$ git log --oneline
+b6ce554 F2: HOTFIX - fix null pointer crash
+fc62b41 M4: add gitignore
+3305b2a M3: add app.js
+fe03ebd M2: add stylesheet
+3987539 M1: initial commit with README
+
