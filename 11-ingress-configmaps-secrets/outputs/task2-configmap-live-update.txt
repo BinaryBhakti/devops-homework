@@ -1,0 +1,67 @@
+
+########## TASK 2 — patching a live ConfigMap does not touch running pods ##########
+
+$ kubectl get configmap yatri-app-config -o jsonpath='{.data.ENVIRONMENT}' && echo ''
+production
+
+$ kubectl exec deploy/yatri-backend -- env | grep ENVIRONMENT
+ENVIRONMENT=production
+
+# patch the ConfigMap
+$ kubectl patch configmap yatri-app-config --type merge -p '{"data":{"ENVIRONMENT":"staging"}}'
+configmap/yatri-app-config patched
+
+$ kubectl get configmap yatri-app-config -o jsonpath='{.data.ENVIRONMENT}' && echo ''
+staging
+
+# 30 seconds later the ConfigMap says staging, the running pod still says production
+$ kubectl exec deploy/yatri-backend -- env | grep ENVIRONMENT
+ENVIRONMENT=production
+
+$ kubectl get pods -l app=yatri-backend
+NAME                             READY   STATUS    RESTARTS   AGE
+yatri-backend-6c58cb99c7-pglsm   1/1     Running   0          57s
+yatri-backend-6c58cb99c7-v8sws   1/1     Running   0          57s
+
+# rolling restart picks up the new value with no downtime
+$ kubectl rollout restart deployment/yatri-backend
+deployment.apps/yatri-backend restarted
+
+$ kubectl rollout status deployment/yatri-backend --timeout=300s
+Waiting for deployment "yatri-backend" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "yatri-backend" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "yatri-backend" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "yatri-backend" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "yatri-backend" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "yatri-backend" rollout to finish: 1 old replicas are pending termination...
+deployment "yatri-backend" successfully rolled out
+
+$ kubectl get pods -l app=yatri-backend
+NAME                             READY   STATUS        RESTARTS   AGE
+yatri-backend-67f597dfc8-nl7xn   1/1     Running       0          6s
+yatri-backend-67f597dfc8-zqn6z   1/1     Running       0          7s
+yatri-backend-6c58cb99c7-pglsm   1/1     Terminating   0          64s
+yatri-backend-6c58cb99c7-v8sws   1/1     Terminating   0          64s
+
+$ kubectl exec deploy/yatri-backend -- env | grep ENVIRONMENT
+ENVIRONMENT=staging
+
+# revert for the rest of the lab
+$ kubectl patch configmap yatri-app-config --type merge -p '{"data":{"ENVIRONMENT":"production"}}'
+configmap/yatri-app-config patched
+
+$ kubectl rollout restart deployment/yatri-backend
+deployment.apps/yatri-backend restarted
+
+$ kubectl rollout status deployment/yatri-backend --timeout=300s
+Waiting for deployment spec update to be observed...
+Waiting for deployment "yatri-backend" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "yatri-backend" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "yatri-backend" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "yatri-backend" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "yatri-backend" rollout to finish: 1 old replicas are pending termination...
+deployment "yatri-backend" successfully rolled out
+
+$ kubectl exec deploy/yatri-backend -- env | grep ENVIRONMENT
+ENVIRONMENT=production
+

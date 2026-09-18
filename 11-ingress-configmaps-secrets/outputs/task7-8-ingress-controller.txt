@@ -1,0 +1,84 @@
+
+########## TASK 7 — the Ingress API exists even with no controller running ##########
+
+$ kubectl api-resources | grep -i ingress
+ingressclasses                                   networking.k8s.io/v1              false        IngressClass
+ingresses                           ing          networking.k8s.io/v1              true         Ingress
+
+$ kubectl get ingressclass 2>&1
+No resources found
+
+$ kubectl get pods -n ingress-nginx 2>&1
+No resources found in ingress-nginx namespace.
+
+
+########## TASK 8 — enable and verify the NGINX Ingress Controller ##########
+
+$ minikube addons enable ingress
+* ingress is an addon maintained by Kubernetes. For any concerns contact minikube on GitHub.
+You can view the list of minikube maintainers at: https://github.com/kubernetes/minikube/blob/master/OWNERS
+* After the addon is enabled, please run "minikube tunnel" and your ingress resources would be available at "127.0.0.1"
+  - Using image registry.k8s.io/ingress-nginx/controller:v1.15.1
+  - Using image registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.9
+  - Using image registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.9
+* Verifying ingress addon...
+* The 'ingress' addon is enabled
+
+$ kubectl get all -n ingress-nginx
+NAME                                           READY   STATUS      RESTARTS   AGE
+pod/ingress-nginx-admission-create-jkqlx       0/1     Completed   0          19m
+pod/ingress-nginx-admission-patch-zxwjp        0/1     Completed   0          19m
+pod/ingress-nginx-controller-d7cd8c989-ncxrt   0/1     Running     0          19m
+
+NAME                                         TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)                      AGE
+service/ingress-nginx-controller             NodePort    10.105.42.197   <none>        80:30160/TCP,443:30381/TCP   19m
+service/ingress-nginx-controller-admission   ClusterIP   10.97.188.175   <none>        443/TCP                      19m
+
+NAME                                       READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/ingress-nginx-controller   0/1     1            0           19m
+
+NAME                                                 DESIRED   CURRENT   READY   AGE
+replicaset.apps/ingress-nginx-controller-d7cd8c989   1         1         0       19m
+
+NAME                                       STATUS     COMPLETIONS   DURATION   AGE
+job.batch/ingress-nginx-admission-create   Complete   1/1           68s        19m
+job.batch/ingress-nginx-admission-patch    Complete   1/1           69s        19m
+
+$ kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=300s
+pod/ingress-nginx-controller-d7cd8c989-ncxrt condition met
+
+$ kubectl get pods -n ingress-nginx -o wide
+NAME                                       READY   STATUS      RESTARTS   AGE   IP            NODE       NOMINATED NODE   READINESS GATES
+ingress-nginx-admission-create-jkqlx       0/1     Completed   0          21m   10.244.0.33   minikube   <none>           <none>
+ingress-nginx-admission-patch-zxwjp        0/1     Completed   0          21m   10.244.0.34   minikube   <none>           <none>
+ingress-nginx-controller-d7cd8c989-ncxrt   1/1     Running     0          21m   10.244.0.35   minikube   <none>           <none>
+
+$ kubectl get service -n ingress-nginx
+NAME                                 TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)                      AGE
+ingress-nginx-controller             NodePort    10.105.42.197   <none>        80:30160/TCP,443:30381/TCP   21m
+ingress-nginx-controller-admission   ClusterIP   10.97.188.175   <none>        443/TCP                      21m
+
+$ kubectl get ingressclass
+NAME              CONTROLLER             PARAMETERS   AGE
+nginx (default)   k8s.io/ingress-nginx   <none>       21m
+
+$ kubectl get validatingwebhookconfigurations | grep -i ingress
+ingress-nginx-admission   1          21m
+
+$ kubectl -n ingress-nginx logs deploy/ingress-nginx-controller --tail=15
+I0918 00:47:00.959346       7 nginx.go:273] "Starting NGINX Ingress controller"
+I0918 00:47:01.052191       7 event.go:377] Event(v1.ObjectReference{Kind:"ConfigMap", Namespace:"ingress-nginx", Name:"tcp-services", UID:"9eff56c9-356d-4ee1-9445-18abb9f880d6", APIVersion:"v1", ResourceVersion:"6609", FieldPath:""}): type: 'Normal' reason: 'CREATE' ConfigMap ingress-nginx/tcp-services
+I0918 00:47:01.054656       7 event.go:377] Event(v1.ObjectReference{Kind:"ConfigMap", Namespace:"ingress-nginx", Name:"ingress-nginx-controller", UID:"6e7b4f83-5fa7-4c02-b6ff-4f8e322e3f90", APIVersion:"v1", ResourceVersion:"6608", FieldPath:""}): type: 'Normal' reason: 'CREATE' ConfigMap ingress-nginx/ingress-nginx-controller
+I0918 00:47:01.057818       7 event.go:377] Event(v1.ObjectReference{Kind:"ConfigMap", Namespace:"ingress-nginx", Name:"udp-services", UID:"e9171b96-61a9-4e6c-919c-a11bf56b91b7", APIVersion:"v1", ResourceVersion:"6610", FieldPath:""}): type: 'Normal' reason: 'CREATE' ConfigMap ingress-nginx/udp-services
+I0918 00:47:02.235590       7 nginx.go:319] "Starting NGINX process"
+I0918 00:47:02.236693       7 leaderelection.go:258] "Attempting to acquire leader lease..." lock="ingress-nginx/ingress-nginx-leader"
+I0918 00:47:02.240022       7 nginx.go:339] "Starting validation webhook" address=":8443" certPath="/usr/local/certificates/cert" keyPath="/usr/local/certificates/key"
+I0918 00:47:02.331402       7 controller.go:217] "Configuration changes detected, backend reload required"
+I0918 00:47:02.336899       7 status.go:85] "New leader elected" identity="ingress-nginx-controller-d7cd8c989-ncxrt"
+I0918 00:47:02.336980       7 leaderelection.go:272] "Successfully acquired lease" lock="ingress-nginx/ingress-nginx-leader"
+I0918 00:47:02.343457       7 status.go:224] "POD is not ready" pod="ingress-nginx/ingress-nginx-controller-d7cd8c989-ncxrt" node="minikube"
+I0918 00:47:02.399933       7 controller.go:231] "Backend successfully reloaded"
+I0918 00:47:02.400076       7 controller.go:243] "Initial sync, sleeping for 1 second"
+I0918 00:47:02.400250       7 event.go:377] Event(v1.ObjectReference{Kind:"Pod", Namespace:"ingress-nginx", Name:"ingress-nginx-controller-d7cd8c989-ncxrt", UID:"58a4a9da-da85-4414-8f8d-d22d84333a5c", APIVersion:"v1", ResourceVersion:"6968", FieldPath:""}): type: 'Normal' reason: 'RELOAD' NGINX reload triggered due to a change in configuration
+I0918 00:47:02.445844       7 status.go:224] "POD is not ready" pod="ingress-nginx/ingress-nginx-controller-d7cd8c989-ncxrt" node="minikube"
+

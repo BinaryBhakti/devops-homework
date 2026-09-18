@@ -1,0 +1,104 @@
+
+########## TASK 4 — the trailing-newline base64 gotcha ##########
+
+$ echo 'secretpassword' | xxd
+00000000: 7365 6372 6574 7061 7373 776f 7264 0a    secretpassword.
+
+$ echo 'secretpassword' | base64
+c2VjcmV0cGFzc3dvcmQK
+
+$ echo -n 'secretpassword' | xxd
+00000000: 7365 6372 6574 7061 7373 776f 7264       secretpassword
+
+$ echo -n 'secretpassword' | base64
+c2VjcmV0cGFzc3dvcmQ=
+
+$ echo "Wrong (with newline): $(echo 'secretpassword' | base64)"
+Wrong (with newline): c2VjcmV0cGFzc3dvcmQK
+
+$ echo "Right (no newline):   $(echo -n 'secretpassword' | base64)"
+Right (no newline):   c2VjcmV0cGFzc3dvcmQ=
+
+# decode both and measure the byte length
+$ echo 'c2VjcmV0cGFzc3dvcmQK' | base64 --decode | wc -c
+      15
+
+$ echo 'c2VjcmV0cGFzc3dvcmQ=' | base64 --decode | wc -c
+      14
+
+# prove what the course Secret actually contains
+$ kubectl get secret yatri-db-secret -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 --decode | xxd
+00000000: 7365 6372 6574 7061 7373 776f 7264       secretpassword
+
+# and what a Secret built the wrong way would contain
+$ kubectl create secret generic broken-secret --from-literal=PASSWORD="$(echo 'secretpassword')" --dry-run=client -o yaml
+apiVersion: v1
+data:
+  PASSWORD: c2VjcmV0cGFzc3dvcmQ=
+kind: Secret
+metadata:
+  name: broken-secret
+
+$ printf 'secretpassword\n' | base64
+c2VjcmV0cGFzc3dvcmQK
+
+
+########## TASK 4 addendum — where the newline actually gets in, and where it does not ##########
+
+# --from-literal with $(...) came out CLEAN above, because command substitution strips
+# trailing newlines. So that is not where the bug lives. These two are where it lives:
+# 1. hand-writing the base64 of 'echo password' straight into a Secret manifest
+$ cd /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad && echo 'secretpassword' | base64 > wrong.b64 && cat wrong.b64
+c2VjcmV0cGFzc3dvcmQK
+
+$ cd /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad && printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: newline-demo\ntype: Opaque\ndata:\n  POSTGRES_PASSWORD: %s\n' "$(cat wrong.b64)" > newline-demo.yaml && cat newline-demo.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: newline-demo
+type: Opaque
+data:
+  POSTGRES_PASSWORD: c2VjcmV0cGFzc3dvcmQK
+
+$ kubectl apply -f /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/newline-demo.yaml
+secret/newline-demo created
+
+$ kubectl get secret newline-demo -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 --decode | xxd
+00000000: 7365 6372 6574 7061 7373 776f 7264 0a    secretpassword.
+
+# 2. kubectl create secret --from-file, which reads the file byte for byte, newline included
+$ cd /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad && echo 'secretpassword' > pw.txt && xxd pw.txt
+00000000: 7365 6372 6574 7061 7373 776f 7264 0a    secretpassword.
+
+$ kubectl create secret generic fromfile-demo --from-file=POSTGRES_PASSWORD=/private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/pw.txt -o yaml --dry-run=client
+apiVersion: v1
+data:
+  POSTGRES_PASSWORD: c2VjcmV0cGFzc3dvcmQK
+kind: Secret
+metadata:
+  name: fromfile-demo
+
+# side by side: 15 bytes vs 14. Postgres will reject the 15-byte one with 'password authentication failed'
+$ kubectl get secret newline-demo -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 --decode | wc -c
+      15
+
+$ kubectl get secret yatri-db-secret -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 --decode | wc -c
+      14
+
+# the safe ways to build a Secret:
+$ kubectl create secret generic safe-demo --from-literal=POSTGRES_PASSWORD=secretpassword -o yaml --dry-run=client | grep -A2 '^data'
+data:
+  POSTGRES_PASSWORD: c2VjcmV0cGFzc3dvcmQ=
+kind: Secret
+
+$ cd /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad && printf 'secretpassword' > pw-clean.txt && xxd pw-clean.txt && kubectl create secret generic safe-file-demo --from-file=POSTGRES_PASSWORD=/private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/pw-clean.txt -o yaml --dry-run=client | grep -A2 '^data'
+00000000: 7365 6372 6574 7061 7373 776f 7264       secretpassword
+data:
+  POSTGRES_PASSWORD: c2VjcmV0cGFzc3dvcmQ=
+kind: Secret
+
+$ kubectl delete secret newline-demo
+secret "newline-demo" deleted from default namespace
+
+$ rm -f /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/pw.txt /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/pw-clean.txt /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/wrong.b64
+

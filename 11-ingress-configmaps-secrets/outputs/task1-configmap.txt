@@ -1,0 +1,82 @@
+
+########## TASK 1 — ConfigMap: decoupling non-sensitive configuration ##########
+
+$ cat 01-configmap/app-config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yatri-app-config
+  labels:
+    app: yatri-backend
+data:
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+  PORT: "5000"
+  DEFAULT_CURRENCY: "INR"
+  MAX_BOOKING_DAYS: "30"
+
+$ kubectl apply -f 01-configmap/app-config.yaml
+configmap/yatri-app-config created
+
+$ kubectl get configmap yatri-app-config
+NAME               DATA   AGE
+yatri-app-config   5      1s
+
+$ kubectl describe configmap yatri-app-config
+Name:         yatri-app-config
+Namespace:    default
+Labels:       app=yatri-backend
+Annotations:  <none>
+
+Data
+====
+DEFAULT_CURRENCY:
+----
+INR
+
+ENVIRONMENT:
+----
+production
+
+LOG_LEVEL:
+----
+INFO
+
+MAX_BOOKING_DAYS:
+----
+30
+
+PORT:
+----
+5000
+
+
+BinaryData
+====
+
+Events:  <none>
+
+$ kubectl get configmap yatri-app-config -o jsonpath='{.data.ENVIRONMENT}' && echo ''
+production
+
+$ kubectl get configmap yatri-app-config -o jsonpath='{.data.LOG_LEVEL}' && echo ''
+INFO
+
+$ kubectl get configmap yatri-app-config -o yaml | grep -v 'creationTimestamp\|resourceVersion\|uid:'
+apiVersion: v1
+data:
+  DEFAULT_CURRENCY: INR
+  ENVIRONMENT: production
+  LOG_LEVEL: INFO
+  MAX_BOOKING_DAYS: "30"
+  PORT: "5000"
+kind: ConfigMap
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"v1","data":{"DEFAULT_CURRENCY":"INR","ENVIRONMENT":"production","LOG_LEVEL":"INFO","MAX_BOOKING_DAYS":"30","PORT":"5000"},"kind":"ConfigMap","metadata":{"annotations":{},"labels":{"app":"yatri-backend"},"name":"yatri-app-config","namespace":"default"}}
+  labels:
+    app: yatri-backend
+  name: yatri-app-config
+  namespace: default
+

@@ -1,0 +1,166 @@
+
+########## TASK 14 — the end-to-end stack and its automation scripts ##########
+
+$ grep -c '^---' 04-full-demo/backend.yaml
+2
+
+$ kubectl get configmap,secret,ingress,deploy,svc,pods -l app=yatri-app
+NAME                         DATA   AGE
+configmap/yatri-app-config   5      24m
+
+NAME                     TYPE     DATA   AGE
+secret/yatri-db-secret   Opaque   3      24m
+
+NAME                                      CLASS   HOSTS         ADDRESS        PORTS   AGE
+ingress.networking.k8s.io/yatri-ingress   nginx   yatri.local   192.168.49.2   80      33s
+
+$ kubectl get configmap yatri-app-config secret yatri-db-secret
+NAME               DATA   AGE
+yatri-app-config   5      24m
+Error from server (NotFound): configmaps "secret" not found
+Error from server (NotFound): configmaps "yatri-db-secret" not found
+
+$ kubectl get deploy,svc,pods -l app=yatri-frontend
+NAME                             READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/yatri-frontend   2/2     2            2           37s
+
+NAME                             TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+service/yatri-frontend-service   ClusterIP   10.99.163.175   <none>        80/TCP    37s
+
+NAME                                 READY   STATUS    RESTARTS   AGE
+pod/yatri-frontend-ddcfc4b5f-5dtjc   1/1     Running   0          36s
+pod/yatri-frontend-ddcfc4b5f-rc4bn   1/1     Running   0          37s
+
+$ kubectl get deploy,svc,pods -l app=yatri-backend
+NAME                            READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/yatri-backend   2/2     2            2           24m
+
+NAME                            TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
+service/yatri-backend-service   ClusterIP   10.97.50.227   <none>        80/TCP    24m
+
+NAME                               READY   STATUS    RESTARTS   AGE
+pod/yatri-backend-f9cfbffc-8t57m   1/1     Running   0          22m
+pod/yatri-backend-f9cfbffc-wzpz4   1/1     Running   0          22m
+
+$ kubectl get ingress yatri-ingress
+NAME            CLASS   HOSTS         ADDRESS        PORTS   AGE
+yatri-ingress   nginx   yatri.local   192.168.49.2   80      34s
+
+# end-to-end request path: curl -> port-forward -> ingress-nginx -> ClusterIP -> pod -> env from ConfigMap+Secret
+$ curl -s -H 'Host: yatri.local' http://127.0.0.1:18080/api/
+Yatri Backend API
+=================
+ENVIRONMENT     : production
+LOG_LEVEL       : INFO
+DEFAULT_CURRENCY: INR
+POSTGRES_USER   : yatri_admin
+POSTGRES_DB     : yatri_production_db
+
+$ cat 04-full-demo/cleanup.sh
+#!/usr/bin/env bash
+# cleanup.sh — Tear down all demo resources for Session 12
+set -euo pipefail
+
+DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+echo "[INFO] Deleting Ingress..."
+kubectl delete -f "${DEMO_DIR}/ingress.yaml"   --ignore-not-found=true
+
+echo "[INFO] Deleting Backend Deployment and Service..."
+kubectl delete -f "${DEMO_DIR}/backend.yaml"   --ignore-not-found=true
+
+echo "[INFO] Deleting Frontend Deployment and Service..."
+kubectl delete -f "${DEMO_DIR}/frontend.yaml"  --ignore-not-found=true
+
+echo "[INFO] Deleting Secret..."
+kubectl delete -f "${DEMO_DIR}/secret.yaml"    --ignore-not-found=true
+
+echo "[INFO] Deleting ConfigMap..."
+kubectl delete -f "${DEMO_DIR}/configmap.yaml" --ignore-not-found=true
+
+echo "[INFO] All demo resources removed."
+
+$ bash 04-full-demo/cleanup.sh
+[INFO] Deleting Ingress...
+ingress.networking.k8s.io "yatri-ingress" deleted from default namespace
+[INFO] Deleting Backend Deployment and Service...
+deployment.apps "yatri-backend" deleted from default namespace
+service "yatri-backend-service" deleted from default namespace
+[INFO] Deleting Frontend Deployment and Service...
+deployment.apps "yatri-frontend" deleted from default namespace
+service "yatri-frontend-service" deleted from default namespace
+[INFO] Deleting Secret...
+secret "yatri-db-secret" deleted from default namespace
+[INFO] Deleting ConfigMap...
+configmap "yatri-app-config" deleted from default namespace
+[INFO] All demo resources removed.
+
+$ kubectl get ingress yatri-ingress 2>&1 || echo 'Ingress deleted'
+Error from server (NotFound): ingresses.networking.k8s.io "yatri-ingress" not found
+Ingress deleted
+
+$ kubectl get deployment yatri-backend yatri-frontend 2>&1 || echo 'Deployments deleted'
+Error from server (NotFound): deployments.apps "yatri-backend" not found
+Error from server (NotFound): deployments.apps "yatri-frontend" not found
+Deployments deleted
+
+$ kubectl get configmap yatri-app-config 2>&1 || echo 'ConfigMap deleted'
+Error from server (NotFound): configmaps "yatri-app-config" not found
+ConfigMap deleted
+
+$ kubectl get all
+NAME                                 READY   STATUS        RESTARTS   AGE
+pod/yatri-backend-f9cfbffc-8t57m     1/1     Terminating   0          22m
+pod/yatri-backend-f9cfbffc-wzpz4     1/1     Terminating   0          22m
+pod/yatri-frontend-ddcfc4b5f-5dtjc   1/1     Terminating   0          37s
+pod/yatri-frontend-ddcfc4b5f-rc4bn   1/1     Terminating   0          38s
+
+NAME                 TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE
+service/kubernetes   ClusterIP   10.96.0.1    <none>        443/TCP   24m
+
+
+########## TASK 14 addendum — corrected resource audit (the earlier one had a kubectl syntax slip) ##########
+
+# 'kubectl get configmap yatri-app-config secret yatri-db-secret' reads 'secret' as another
+# CONFIGMAP name, not a new resource type. The comma form is the correct one:
+$ kubectl get configmap/yatri-app-config secret/yatri-db-secret
+NAME                         DATA   AGE
+configmap/yatri-app-config   5      70s
+
+NAME                     TYPE     DATA   AGE
+secret/yatri-db-secret   Opaque   3      70s
+
+$ kubectl get cm,secret,deploy,svc,ingress,pods -l app=yatri-app
+NAME                         DATA   AGE
+configmap/yatri-app-config   5      71s
+
+NAME                     TYPE     DATA   AGE
+secret/yatri-db-secret   Opaque   3      71s
+
+# the frontend/backend objects carry their own app labels, so audit by those:
+$ kubectl get deploy,svc,pods -l app=yatri-frontend
+NAME                             READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/yatri-frontend   2/2     2            2           71s
+
+NAME                             TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)   AGE
+service/yatri-frontend-service   ClusterIP   10.106.109.128   <none>        80/TCP    71s
+
+NAME                                 READY   STATUS    RESTARTS   AGE
+pod/yatri-frontend-ddcfc4b5f-bs6pn   1/1     Running   0          71s
+pod/yatri-frontend-ddcfc4b5f-v8pjf   1/1     Running   0          71s
+
+$ kubectl get deploy,svc,pods -l app=yatri-backend
+NAME                            READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/yatri-backend   2/2     2            2           71s
+
+NAME                            TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+service/yatri-backend-service   ClusterIP   10.96.108.104   <none>        80/TCP    71s
+
+NAME                                 READY   STATUS    RESTARTS   AGE
+pod/yatri-backend-6c58cb99c7-bl6pd   1/1     Running   0          71s
+pod/yatri-backend-6c58cb99c7-lfqrh   1/1     Running   0          71s
+
+$ kubectl get ingress
+NAME                 CLASS   HOSTS                                  ADDRESS        PORTS     AGE
+campus-ingress-tls   nginx   portal.campus.local,api.campus.local   192.168.49.2   80, 443   59s
+

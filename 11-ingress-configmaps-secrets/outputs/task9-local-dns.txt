@@ -1,0 +1,20 @@
+
+########## TASK 9 — mapping the cluster IP to a local hostname ##########
+
+$ minikube ip
+192.168.49.2
+
+$ kubectl get nodes -o wide
+NAME           STATUS   ROLES           AGE   VERSION   INTERNAL-IP    EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION            CONTAINER-RUNTIME
+minikube       Ready    control-plane   82m   v1.37.0   192.168.49.2   <none>        Debian GNU/Linux 12 (bookworm)   7.0.12-linuxkit (arm64)   containerd://2.3.4
+minikube-m02   Ready    <none>          81m   v1.37.0   192.168.49.3   <none>        Debian GNU/Linux 12 (bookworm)   7.0.12-linuxkit (arm64)   containerd://2.3.4
+
+$ grep -E 'yatri.local|campus.local' /etc/hosts || echo 'no lab entries in /etc/hosts yet'
+no lab entries in /etc/hosts yet
+
+# on the macOS docker driver the minikube IP is not routable from the host (Session 11, Task 12),
+# so /etc/hosts alone cannot reach the Ingress. The port-forward below is what actually carries traffic.
+$ curl --connect-timeout 4 -s -o /dev/null -w '%{http_code}\n' http://$(minikube ip) || echo 'no route to the node IP from macOS, as expected'
+000
+no route to the node IP from macOS, as expected
+

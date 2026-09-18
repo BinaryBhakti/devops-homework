@@ -1,0 +1,123 @@
+# port-forward into the ingress controller (the macOS docker-driver workaround):
+Forwarding from 127.0.0.1:18080 -> 80
+Forwarding from [::1]:18080 -> 80
+Forwarding from 127.0.0.1:18443 -> 443
+Forwarding from [::1]:18443 -> 443
+
+
+########## TASK 10 — path-based Layer 7 routing on yatri.local ##########
+
+$ cat 04-full-demo/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: yatri-ingress
+  namespace: default
+  labels:
+    app: yatri-app
+  annotations:
+    # Do not force HTTP -> HTTPS redirect (no TLS cert in this demo)
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    # Allow regex capture groups in path rules
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    # Strip /api prefix before forwarding to backend pods
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: yatri.local
+      http:
+        paths:
+          # Route /api/* to the backend Python service
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: yatri-backend-service
+                port:
+                  number: 80
+          # Route / (root) to the frontend Nginx service
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: yatri-frontend-service
+                port:
+                  number: 80
+
+$ kubectl apply -f 04-full-demo/frontend.yaml
+deployment.apps/yatri-frontend created
+service/yatri-frontend-service created
+
+$ kubectl apply -f 04-full-demo/backend.yaml
+deployment.apps/yatri-backend unchanged
+service/yatri-backend-service unchanged
+
+$ kubectl rollout status deployment/yatri-frontend --timeout=300s
+Waiting for deployment "yatri-frontend" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "yatri-frontend" rollout to finish: 1 of 2 updated replicas are available...
+deployment "yatri-frontend" successfully rolled out
+
+$ kubectl rollout status deployment/yatri-backend --timeout=300s
+deployment "yatri-backend" successfully rolled out
+
+$ kubectl apply -f 04-full-demo/ingress.yaml
+ingress.networking.k8s.io/yatri-ingress created
+
+$ kubectl get ingress yatri-ingress
+NAME            CLASS   HOSTS         ADDRESS        PORTS   AGE
+yatri-ingress   nginx   yatri.local   192.168.49.2   80      15s
+
+$ kubectl describe ingress yatri-ingress
+Name:             yatri-ingress
+Labels:           app=yatri-app
+Namespace:        default
+Address:          192.168.49.2
+Ingress Class:    nginx
+Default backend:  <default>
+Rules:
+  Host         Path  Backends
+  ----         ----  --------
+  yatri.local  
+               /api(/|$)(.*)   yatri-backend-service:80 (10.244.1.76:5000,10.244.0.32:5000)
+               /               yatri-frontend-service:80 (10.244.1.77:80,10.244.0.36:80)
+Annotations:   nginx.ingress.kubernetes.io/rewrite-target: /$2
+               nginx.ingress.kubernetes.io/ssl-redirect: false
+               nginx.ingress.kubernetes.io/use-regex: true
+Events:
+  Type    Reason  Age               From                      Message
+  ----    ------  ----              ----                      -------
+  Normal  Sync    2s (x2 over 15s)  nginx-ingress-controller  Scheduled for sync
+
+# / must land on the nginx frontend
+$ curl -s -H 'Host: yatri.local' http://127.0.0.1:18080/ | grep -i '<title>'
+<title>Welcome to nginx!</title>
+
+# /api/ must land on the python backend, with the /api prefix rewritten away
+$ curl -s -H 'Host: yatri.local' http://127.0.0.1:18080/api/
+Yatri Backend API
+=================
+ENVIRONMENT     : production
+LOG_LEVEL       : INFO
+DEFAULT_CURRENCY: INR
+POSTGRES_USER   : yatri_admin
+POSTGRES_DB     : yatri_production_db
+
+$ curl -s -o /dev/null -w 'status=%{http_code}\n' -H 'Host: yatri.local' http://127.0.0.1:18080/api/
+status=200
+
+# an unknown Host gets the controller default backend, not our app
+$ curl -s -o /dev/null -w 'status=%{http_code}\n' -H 'Host: not-our-domain.local' http://127.0.0.1:18080/
+status=404
+
+# the rules the controller actually compiled into nginx.conf
+$ kubectl -n ingress-nginx exec deploy/ingress-nginx-controller -- /nginx-ingress-controller --version 2>&1 | head -6
+-------------------------------------------------------------------------------
+NGINX Ingress controller
+  Release:       v1.15.1
+  Build:         0df02f2cfcf5fe4ad3cf31492bca770ac2a1606a
+  Repository:    https://github.com/kubernetes/ingress-nginx
+  nginx version: nginx/1.27.1
+
+$ kubectl -n ingress-nginx exec deploy/ingress-nginx-controller -- cat /etc/nginx/nginx.conf | grep -n 'server_name yatri.local' -A6 | head -30
+

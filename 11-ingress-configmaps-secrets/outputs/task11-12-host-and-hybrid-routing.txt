@@ -1,0 +1,128 @@
+
+########## TASK 11 + 12 — virtual-host routing and the hybrid host+path Ingress ##########
+
+$ cat 03-ingress/ingress-tls.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: campus-ingress-tls
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - portal.campus.local
+        - api.campus.local
+      secretName: campus-tls-cert
+  rules:
+    # Host 1: Frontend Student Portal (Host-based routing)
+    - host: portal.campus.local
+      http:
+        paths:
+          - path: /()(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: yatri-frontend-service
+                port:
+                  number: 80
+
+    # Host 2: Backend REST API (Host-based routing + Path-based routing)
+    - host: api.campus.local
+      http:
+        paths:
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: yatri-backend-service
+                port:
+                  number: 80
+
+# TLS secret first, otherwise the ingress is served with the controller's fake certificate
+$ cd /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad && openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout tls.key -out tls.crt -subj '/CN=campus.local/O=CampusDevOps' 2>&1
+Generating a 2048 bit RSA private key
+.......................................................+++++
+..+++++
+writing new private key to 'tls.key'
+-----
+
+$ openssl x509 -in /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/tls.crt -noout -subject -issuer -dates
+subject= /CN=campus.local/O=CampusDevOps
+issuer= /CN=campus.local/O=CampusDevOps
+notBefore=Sep 18 00:49:34 2026 GMT
+notAfter=Sep 18 00:49:34 2027 GMT
+
+$ kubectl create secret tls campus-tls-cert --cert=/private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/tls.crt --key=/private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/tls.key
+secret/campus-tls-cert created
+
+$ kubectl get secret campus-tls-cert
+NAME              TYPE                DATA   AGE
+campus-tls-cert   kubernetes.io/tls   2      0s
+
+$ kubectl get secret campus-tls-cert -o jsonpath='{.type}' && echo ''
+kubernetes.io/tls
+
+$ kubectl apply -f 03-ingress/ingress-tls.yaml
+ingress.networking.k8s.io/campus-ingress-tls created
+
+$ kubectl get ingress
+NAME                 CLASS   HOSTS                                  ADDRESS        PORTS     AGE
+campus-ingress-tls   nginx   portal.campus.local,api.campus.local                  80, 443   15s
+yatri-ingress        nginx   yatri.local                            192.168.49.2   80        31s
+
+$ kubectl describe ingress campus-ingress-tls
+Name:             campus-ingress-tls
+Labels:           <none>
+Namespace:        default
+Address:          
+Ingress Class:    nginx
+Default backend:  <default>
+TLS:
+  campus-tls-cert terminates portal.campus.local,api.campus.local
+Rules:
+  Host                 Path  Backends
+  ----                 ----  --------
+  portal.campus.local  
+                       /()(.*)   yatri-frontend-service:80 (10.244.1.77:80,10.244.0.36:80)
+  api.campus.local     
+                       /api(/|$)(.*)   yatri-backend-service:80 (10.244.1.76:5000,10.244.0.32:5000)
+Annotations:           nginx.ingress.kubernetes.io/rewrite-target: /$2
+                       nginx.ingress.kubernetes.io/ssl-redirect: true
+Events:
+  Type    Reason  Age   From                      Message
+  ----    ------  ----  ----                      -------
+  Normal  Sync    15s   nginx-ingress-controller  Scheduled for sync
+
+# host 1 -> frontend
+$ curl -sk --resolve portal.campus.local:18443:127.0.0.1 https://portal.campus.local:18443/ | grep -i '<title>'
+<title>Welcome to nginx!</title>
+
+# host 2, path /api -> backend
+$ curl -sk --resolve api.campus.local:18443:127.0.0.1 https://api.campus.local:18443/api/
+Yatri Backend API
+=================
+ENVIRONMENT     : production
+LOG_LEVEL       : INFO
+DEFAULT_CURRENCY: INR
+POSTGRES_USER   : yatri_admin
+POSTGRES_DB     : yatri_production_db
+
+# same IP, same port, different Host header -> different service. That is virtual hosting.
+$ curl -sk -o /dev/null -w 'portal.campus.local -> %{http_code}\n' --resolve portal.campus.local:18443:127.0.0.1 https://portal.campus.local:18443/
+portal.campus.local -> 200
+
+$ curl -sk -o /dev/null -w 'api.campus.local/api/ -> %{http_code}\n' --resolve api.campus.local:18443:127.0.0.1 https://api.campus.local:18443/api/
+api.campus.local/api/ -> 200
+
+# api.campus.local has no rule for '/', so it falls through to the default backend
+$ curl -sk -o /dev/null -w 'api.campus.local/ -> %{http_code}\n' --resolve api.campus.local:18443:127.0.0.1 https://api.campus.local:18443/
+api.campus.local/ -> 404
+
+# ssl-redirect: true means plain HTTP on these hosts is bounced to HTTPS
+$ curl -s -o /dev/null -w 'http -> %{http_code} %{redirect_url}\n' -H 'Host: portal.campus.local' http://127.0.0.1:18080/
+http -> 308 https://portal.campus.local/
+

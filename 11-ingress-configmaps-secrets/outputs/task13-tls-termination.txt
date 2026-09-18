@@ -1,0 +1,119 @@
+
+########## TASK 13 — TLS termination proof ##########
+
+$ kubectl get ingress campus-ingress-tls -o jsonpath='{.spec.tls}' && echo ''
+[{"hosts":["portal.campus.local","api.campus.local"],"secretName":"campus-tls-cert"}]
+
+$ curl -k -v --resolve portal.campus.local:18443:127.0.0.1 https://portal.campus.local:18443/
+* (304) (OUT), TLS handshake, Client hello (1):
+* (304) (IN), TLS handshake, Server hello (2):
+* (304) (IN), TLS handshake, Unknown (8):
+* (304) (IN), TLS handshake, Certificate (11):
+* (304) (IN), TLS handshake, CERT verify (15):
+* (304) (IN), TLS handshake, Finished (20):
+* (304) (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / AEAD-AES256-GCM-SHA384 / [blank] / UNDEF
+* Server certificate:
+*  subject: O=Acme Co; CN=Kubernetes Ingress Controller Fake Certificate
+*  start date: Sep 18 00:47:00 2026 GMT
+*  expire date: Sep 18 00:47:00 2027 GMT
+*  issuer: O=Acme Co; CN=Kubernetes Ingress Controller Fake Certificate
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://portal.campus.local:18443/
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: portal.campus.local:18443]
+* [HTTP/2] [1] [:path: /]
+* [HTTP/2] [1] [user-agent: curl/8.7.1]
+* [HTTP/2] [1] [accept: */*]
+> GET / HTTP/2
+< HTTP/2 200 
+
+# without -k, curl rejects the self-signed chain — which is the correct behaviour
+$ curl -s --resolve portal.campus.local:18443:127.0.0.1 https://portal.campus.local:18443/ 2>&1 | head -3; echo "exit code: ${PIPESTATUS[0]}"
+exit code: 60
+
+# the certificate the controller is presenting is the one from our Secret
+$ echo | openssl s_client -connect 127.0.0.1:18443 -servername portal.campus.local 2>/dev/null | openssl x509 -noout -subject -issuer -dates
+subject= /O=Acme Co/CN=Kubernetes Ingress Controller Fake Certificate
+issuer= /O=Acme Co/CN=Kubernetes Ingress Controller Fake Certificate
+notBefore=Sep 18 00:47:00 2026 GMT
+notAfter=Sep 18 00:47:00 2027 GMT
+
+$ kubectl delete -f 03-ingress/ingress-tls.yaml
+ingress.networking.k8s.io "campus-ingress-tls" deleted from default namespace
+
+########## TASK 13 (corrected) — why the first attempt served the wrong certificate, and the fix ##########
+
+# the run above terminated TLS with 'CN=Kubernetes Ingress Controller Fake Certificate'.
+# the controller says exactly why:
+$ kubectl -n ingress-nginx logs deploy/ingress-nginx-controller --tail=300 2>&1 | grep -m3 'campus.local\": x509\|does not contain a Common Name'
+W0918 00:49:35.166141       7 controller.go:1482] Unexpected error validating SSL certificate "default/campus-tls-cert" for server "portal.campus.local": x509: certificate is not valid for any names, but wanted to match portal.campus.local
+W0918 00:49:35.166241       7 controller.go:1488] SSL certificate "default/campus-tls-cert" does not contain a Common Name or Subject Alternative Name for server "portal.campus.local": x509: certificate is not valid for any names, but wanted to match portal.campus.local
+W0918 00:49:35.166278       7 controller.go:1482] Unexpected error validating SSL certificate "default/campus-tls-cert" for server "api.campus.local": x509: certificate is not valid for any names, but wanted to match api.campus.local
+
+# macOS ships LibreSSL, whose `openssl x509` has no -ext flag (the usage dump it printed
+# has been replaced here with the equivalent that does work):
+$ openssl x509 -in tls.crt -noout -subject; openssl x509 -in tls.crt -noout -text | grep -c 'Subject Alternative Name'
+subject= /CN=campus.local/O=CampusDevOps
+0
+
+# the lab-sheet openssl command has no -addext subjectAltName, so the cert carries NO SANs.
+# Go's crypto/x509 (which ingress-nginx uses) ignores Common Name entirely since Go 1.15,
+# so a cert with no SAN matches no hostname at all and the controller falls back to its own.
+# regenerate with SANs for both hosts:
+$ cd /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad && openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout tls-san.key -out tls-san.crt -subj '/CN=campus.local/O=CampusDevOps' -addext 'subjectAltName=DNS:campus.local,DNS:portal.campus.local,DNS:api.campus.local' 2>&1 | tail -2
+writing new private key to 'tls-san.key'
+-----
+
+$ openssl x509 -in tls-san.crt -noout -subject; openssl x509 -in tls-san.crt -noout -text | grep -A1 'Subject Alternative Name'
+subject= /CN=campus.local/O=CampusDevOps
+            X509v3 Subject Alternative Name: 
+                DNS:campus.local, DNS:portal.campus.local, DNS:api.campus.local
+
+$ kubectl delete secret campus-tls-cert --ignore-not-found
+secret "campus-tls-cert" deleted from default namespace
+
+$ kubectl create secret tls campus-tls-cert --cert=/private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/tls-san.crt --key=/private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/tls-san.key
+secret/campus-tls-cert created
+
+$ kubectl get secret campus-tls-cert
+NAME              TYPE                DATA   AGE
+campus-tls-cert   kubernetes.io/tls   2      1s
+
+$ kubectl apply -f 03-ingress/ingress-tls.yaml
+ingress.networking.k8s.io/campus-ingress-tls created
+
+$ kubectl get ingress campus-ingress-tls
+NAME                 CLASS   HOSTS                                  ADDRESS        PORTS     AGE
+campus-ingress-tls   nginx   portal.campus.local,api.campus.local   192.168.49.2   80, 443   20s
+
+$ kubectl -n ingress-nginx logs deploy/ingress-nginx-controller --tail=40 2>&1 | grep -c 'Using default certificate'; true
+4
+
+# now the handshake presents OUR certificate:
+$ curl -k -v --resolve portal.campus.local:18443:127.0.0.1 https://portal.campus.local:18443/
+* SSL connection using TLSv1.3 / AEAD-AES256-GCM-SHA384 / [blank] / UNDEF
+*  subject: CN=campus.local; O=CampusDevOps
+*  start date: Sep 18 00:51:25 2026 GMT
+*  expire date: Sep 18 00:51:25 2027 GMT
+*  issuer: CN=campus.local; O=CampusDevOps
+< HTTP/2 200 
+
+# (the s_client re-check used the same unsupported -ext flag; the curl -v handshake above
+#  already shows the served certificate's subject, issuer and dates)
+
+# and with the CA trusted explicitly, verification passes with no -k at all:
+$ curl -s -o /dev/null -w 'verified https status=%{http_code}\n' --cacert /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/tls-san.crt --resolve portal.campus.local:18443:127.0.0.1 https://portal.campus.local:18443/
+verified https status=200
+
+$ curl -s --cacert /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/tls-san.crt --resolve api.campus.local:18443:127.0.0.1 https://api.campus.local:18443/api/
+Yatri Backend API
+=================
+ENVIRONMENT     : production
+LOG_LEVEL       : INFO
+DEFAULT_CURRENCY: INR
+POSTGRES_USER   : yatri_admin
+POSTGRES_DB     : yatri_production_db
+

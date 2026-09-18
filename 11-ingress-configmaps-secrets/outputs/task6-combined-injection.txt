@@ -1,0 +1,57 @@
+
+########## TASK 6 — one pod consuming a ConfigMap (envFrom) and a Secret (secretKeyRef) ##########
+
+$ grep -n -A12 'envFrom:' 04-full-demo/backend.yaml
+61:          envFrom:
+62-            - configMapRef:
+63-                name: yatri-app-config
+64-          # Inject sensitive credentials from Secret
+65-          env:
+66-            - name: POSTGRES_USER
+67-              valueFrom:
+68-                secretKeyRef:
+69-                  name: yatri-db-secret
+70-                  key: POSTGRES_USER
+71-            - name: POSTGRES_PASSWORD
+72-              valueFrom:
+73-                secretKeyRef:
+
+$ kubectl apply -f 04-full-demo/configmap.yaml
+configmap/yatri-app-config configured
+
+$ kubectl apply -f 04-full-demo/secret.yaml
+secret/yatri-db-secret configured
+
+$ kubectl apply -f 04-full-demo/backend.yaml
+deployment.apps/yatri-backend created
+service/yatri-backend-service created
+
+$ kubectl rollout status deployment/yatri-backend --timeout=300s
+Waiting for deployment spec update to be observed...
+Waiting for deployment "yatri-backend" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "yatri-backend" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "yatri-backend" rollout to finish: 1 of 2 updated replicas are available...
+deployment "yatri-backend" successfully rolled out
+
+$ kubectl get pods -l app=yatri-backend -o wide
+NAME                             READY   STATUS    RESTARTS   AGE   IP            NODE           NOMINATED NODE   READINESS GATES
+yatri-backend-6c58cb99c7-pglsm   1/1     Running   0          20s   10.244.1.73   minikube-m02   <none>           <none>
+yatri-backend-6c58cb99c7-v8sws   1/1     Running   0          20s   10.244.0.30   minikube       <none>           <none>
+
+$ kubectl exec deploy/yatri-backend -- env | grep -E 'ENVIRONMENT|LOG_LEVEL|POSTGRES|DEFAULT_CURRENCY|MAX_BOOKING' | sort
+DEFAULT_CURRENCY=INR
+ENVIRONMENT=production
+LOG_LEVEL=INFO
+MAX_BOOKING_DAYS=30
+POSTGRES_DB=yatri_production_db
+POSTGRES_PASSWORD=secretpassword
+POSTGRES_USER=yatri_admin
+
+# the backend echoes its own configuration back over HTTP
+$ kubectl run tmp-curl --rm -i --restart=Never --image=curlimages/curl:8.5.0 --command -- curl -s http://yatri-backend-service
+All commands and output from this session will be recorded in container logs, including credentials and sensitive information passed through the command prompt.
+If you don't see a command prompt, try pressing enter.
+warning: couldn't attach to pod/tmp-curl, falling back to streaming logs: unable to upgrade connection: container tmp-curl not found in pod tmp-curl_default
+pod "tmp-curl" deleted from default namespace
+pod default/tmp-curl terminated (Error)
+
