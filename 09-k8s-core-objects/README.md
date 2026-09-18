@@ -10,6 +10,8 @@ rolling updates and rollbacks, two troubleshooting drills, and the four deployme
 The manifests in [`manifests/`](manifests) are the course files, copied in so this folder runs
 standalone; the two files that are mine are marked as such.
 
+The screenshots are **renders of those transcripts**, not captures of a live terminal — every lab ran non-interactively, so there was no window to photograph. Each image names its source transcript in the title bar; see [`screenshots/`](screenshots).
+
 Cluster: the two-node Minikube from [Homework 8](../08-k8s-fundamentals) — `minikube`
 (control-plane, also schedulable) and `minikube-m02` (worker).
 
@@ -36,6 +38,10 @@ minikube-m02   Ready    <none>          99s     v1.37.0   192.168.49.3   <none> 
 ```
 
 Client v1.36.1 against server v1.37.0 — one minor version apart, inside the supported skew.
+
+
+![cluster-info, node health and the CoreDNS pod](screenshots/01-cluster-health.png)
+*cluster-info, node health and the CoreDNS pod*
 
 ---
 
@@ -147,6 +153,13 @@ No resources found in default namespace.
 Delete a bare Pod and it is gone for good. Nothing recreates it — that is the whole reason
 ReplicaSets and Deployments exist (Task 6).
 
+
+![apply, wait for Ready, and get pods -o wide with the pod IP and node](screenshots/02-nginx-pod-operations.png)
+*apply, wait for Ready, and get pods -o wide with the pod IP and node*
+
+![describe pod and the nginx access log line](screenshots/02b-nginx-pod-describe-logs.png)
+*describe pod and the nginx access log line*
+
 ---
 
 # Task 3 — `ErrImagePull` → `ImagePullBackOff`
@@ -213,6 +226,10 @@ kubectl apply ──► apiserver ──► etcd            ✅  object stored
                    kubelet  ──► containerd pull  ❌  ErrImagePull → ImagePullBackOff
 ```
 
+
+![ErrImagePull and ImagePullBackOff alternating, with the kubelet events](screenshots/03-imagepullbackoff-error.png)
+*ErrImagePull and ImagePullBackOff alternating, with the kubelet events*
+
 ---
 
 # Task 4 — Capturing the transient phases (`hello.yml`)
@@ -270,6 +287,10 @@ Hello Kubernetes
 
 `Completed` is what `kubectl get` prints; `Succeeded` is the actual `status.phase`. Same thing,
 two names.
+
+
+![ContainerCreating -> Running -> Completed, from both the poll loop and the watch](screenshots/04-pod-lifecycle-stages.png)
+*ContainerCreating -> Running -> Completed, from both the poll loop and the watch*
 
 ---
 
@@ -554,6 +575,22 @@ SIGTERM received; cleaning up...
 slept 30 s instead of 10 s, the kubelet would have sent `SIGKILL` at 20 s and the cleanup would
 have been cut short.
 
+
+![Pending: FailedScheduling against both nodes](screenshots/05-lifecycle-pending.png)
+*Pending: FailedScheduling against both nodes*
+
+![the restart back-off, with the BackOff events](screenshots/05-lifecycle-probes-crashloop.png)
+*the restart back-off, with the BackOff events*
+
+![Running but not Ready, then a liveness-triggered restart](screenshots/05-lifecycle-readiness-liveness.png)
+*Running but not Ready, then a liveness-triggered restart*
+
+![Init:0/1 -> Running, and the 2/2 app + sidecar pod](screenshots/05-lifecycle-init-multicontainer.png)
+*Init:0/1 -> Running, and the 2/2 app + sidecar pod*
+
+![graceful SIGTERM shutdown in 10.5s against a 20s grace period](screenshots/05-lifecycle-termination.png)
+*graceful SIGTERM shutdown in 10.5s against a 20s grace period*
+
 ---
 
 # Task 6 — ReplicaSet and StatefulSet
@@ -735,6 +772,16 @@ The pod came back as **`mysql-0`**, not `mysql-x7f2q`, and it re-attached to
 against the 25-second-old pod. A database that came back under a new name with an empty disk
 would be useless; that is the difference between a StatefulSet and a ReplicaSet in one command.
 
+
+![ReplicaSet self-healing: the replacement is 1 second old](screenshots/06-controllers-rs-statefulset.png)
+*ReplicaSet self-healing: the replacement is 1 second old*
+
+![mysql:5.7 on Apple Silicon: no match for platform in manifest](screenshots/06c-statefulset-mysql57-arm64-failure.png)
+*mysql:5.7 on Apple Silicon: no match for platform in manifest*
+
+![the same StatefulSet on mysql:8.0: ordered startup and per-ordinal PVCs](screenshots/06b-statefulset-arm64.png)
+*the same StatefulSet on mysql:8.0: ordered startup and per-ordinal PVCs*
+
 ---
 
 # Task 7 — DaemonSet
@@ -785,6 +832,10 @@ Falco, Cilium) ship with, because you *do* want telemetry from control-plane nod
 
 The course also ships `deamonset.yml`, the same shape with the real
 `prom/node-exporter` image; it is in [`manifests/deamonset.yml`](manifests/deamonset.yml).
+
+
+![DESIRED 2 derived from the node count, one pod per node](screenshots/07-daemonset-verification.png)
+*DESIRED 2 derived from the node count, one pod per node*
 
 ---
 
@@ -876,6 +927,13 @@ Revision 1 is gone and revision 3 appeared: rolling back does not *rewind* histo
 **appends** a new revision whose content equals the old one. Also note `CHANGE-CAUSE` is
 `<none>` throughout — nothing was annotated with `kubernetes.io/change-cause`, which in
 production you would set so this table is readable.
+
+
+![the pod watch: every new pod reaches 1/1 before an old one is touched](screenshots/08-rolling-update-and-rollback.png)
+*the pod watch: every new pod reaches 1/1 before an old one is touched*
+
+![rollout history and undo, which appends revision 3 rather than rewinding](screenshots/08b-rollout-history-undo.png)
+*rollout history and undo, which appends revision 3 rather than rewinding*
 
 ---
 
@@ -981,6 +1039,13 @@ it up front.
 ```console
 $ sed 's/app: wrong-app-name/app: correct-app-name/' troubleshooting/selector-mismatch.yaml > selector-fixed.yaml && diff ...
 <         app: wrong-app-name
+
+![the rollout stalls at 1 of 3 while the deployment still reports READY 3/3](screenshots/09-troubleshooting-drills.png)
+*the rollout stalls at 1 of 3 while the deployment still reports READY 3/3*
+
+![the API server rejecting the selector mismatch, and the immutability follow-up](screenshots/09b-selector-mismatch.png)
+*the API server rejecting the selector mismatch, and the immutability follow-up*
+
 ---
 >         app: correct-app-name
 
@@ -1171,6 +1236,10 @@ The switch is a two-line diff:
 $ diff 02-blue-green/service-blue.yaml 02-blue-green/service-green.yaml
 15c14
 <     slot: blue     # <-- Currently routing to BLUE (v1)
+
+![the endpoint set flipping to a disjoint set of pod IPs, BLUE -> GREEN -> BLUE](screenshots/11-blue-green-cutover.png)
+*the endpoint set flipping to a disjoint set of pod IPs, BLUE -> GREEN -> BLUE*
+
 ---
 >     slot: green    # <-- NOW routing to GREEN (v2)
 
@@ -1294,6 +1363,10 @@ scale command.
 100 pods. Real 1%-of-traffic canaries need a Layer 7 proxy that splits by weight — an Ingress
 controller with canary annotations, or a service mesh — not a pod count.
 
+
+![4 of 40 requests to the canary at a 9:1 pod ratio](screenshots/12-canary-traffic-split.png)
+*4 of 40 requests to the canary at a 9:1 pod ratio*
+
 ---
 
 # Task 13 — Recreate strategy and its measured outage
@@ -1376,6 +1449,10 @@ this strategy.
 **When Recreate is the right answer anyway:** when two versions must never run at once. A
 schema migration that v1 cannot read, a singleton holding an exclusive lock, or a `ReadWriteOnce`
 volume that only one pod can mount. In those cases the outage is the price of correctness.
+
+
+![the 2 Hz polling loop capturing the outage window](screenshots/13-recreate-downtime-outage.png)
+*the 2 Hz polling loop capturing the outage window*
 
 ---
 
