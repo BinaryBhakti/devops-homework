@@ -15,3 +15,15 @@ sysinfo_report/
 # OS noise
 .DS_Store
 Thumbs.db
+
+# reference material, not part of the submission
+DevOps Assignment Season 2.md
+
+# the instructor's course repo, cloned in for reference — it has its own .git
+Mam's Folder/
+
+# TLS material generated during the Homework 11 lab
+tls.crt
+tls.key
+tls-san.crt
+tls-san.key
