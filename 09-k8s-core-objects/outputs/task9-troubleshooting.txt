@@ -1,0 +1,153 @@
+
+########## DRILL 1 — stalled rollout caused by an unresolvable image tag ##########
+
+# first put a healthy revision 1 in place, so there ARE old pods to keep alive
+$ kubectl apply -f troubleshooting/yatri-backend-v1.yaml
+deployment.apps/yatri-backend created
+
+$ kubectl rollout status deployment/yatri-backend --timeout=180s
+Waiting for deployment "yatri-backend" rollout to finish: 0 out of 3 new replicas have been updated...
+Waiting for deployment "yatri-backend" rollout to finish: 0 of 3 updated replicas are available...
+Waiting for deployment "yatri-backend" rollout to finish: 1 of 3 updated replicas are available...
+Waiting for deployment "yatri-backend" rollout to finish: 2 of 3 updated replicas are available...
+deployment "yatri-backend" successfully rolled out
+
+$ kubectl get pods -l app=yatri-backend -o wide
+NAME                             READY   STATUS    RESTARTS   AGE   IP            NODE           NOMINATED NODE   READINESS GATES
+yatri-backend-8478778b59-nd42m   1/1     Running   0          2s    10.244.1.34   minikube-m02   <none>           <none>
+yatri-backend-8478778b59-p87jn   1/1     Running   0          2s    10.244.1.33   minikube-m02   <none>           <none>
+yatri-backend-8478778b59-rnkj6   1/1     Running   0          2s    10.244.0.12   minikube       <none>           <none>
+
+# now apply the broken image tag
+$ grep -n 'image:' troubleshooting/broken-image.yaml
+33:          image: yatri-backend:non-existent-tag-v999
+
+$ kubectl apply -f troubleshooting/broken-image.yaml
+deployment.apps/yatri-backend configured
+
+$ kubectl rollout status deployment/yatri-backend --timeout=40s
+Waiting for deployment "yatri-backend" rollout to finish: 1 out of 3 new replicas have been updated...
+error: timed out waiting for the condition
+
+$ kubectl get pods -l app=yatri-backend
+NAME                             READY   STATUS         RESTARTS   AGE
+yatri-backend-77dbb657cd-grpb6   0/1     ErrImagePull   0          40s
+yatri-backend-8478778b59-nd42m   1/1     Running        0          42s
+yatri-backend-8478778b59-p87jn   1/1     Running        0          42s
+yatri-backend-8478778b59-rnkj6   1/1     Running        0          42s
+
+$ kubectl get deployment yatri-backend
+NAME            READY   UP-TO-DATE   AVAILABLE   AGE
+yatri-backend   3/3     1            3           42s
+
+$ kubectl get rs -l app=yatri-backend
+NAME                       DESIRED   CURRENT   READY   AGE
+yatri-backend-77dbb657cd   1         1         0       40s
+yatri-backend-8478778b59   3         3         3       42s
+
+$ kubectl describe pod yatri-backend-77dbb657cd-grpb6 | sed -n '/Events:/,$p'
+Events:
+  Type     Reason     Age                From               Message
+  ----     ------     ----               ----               -------
+  Normal   Scheduled  41s                default-scheduler  Successfully assigned default/yatri-backend-77dbb657cd-grpb6 to minikube-m02
+  Normal   Pulling    25s (x2 over 41s)  kubelet            spec.containers{backend}: Pulling image "yatri-backend:non-existent-tag-v999"
+  Warning  Failed     23s (x2 over 39s)  kubelet            spec.containers{backend}: Failed to pull image "yatri-backend:non-existent-tag-v999": failed to pull and unpack image "docker.io/library/yatri-backend:non-existent-tag-v999": failed to resolve reference "docker.io/library/yatri-backend:non-existent-tag-v999": pull access denied, repository does not exist or may require authorization: server message: insufficient_scope: authorization failed
+  Warning  Failed     23s (x2 over 39s)  kubelet            spec.containers{backend}: Error: ErrImagePull
+  Normal   BackOff    12s (x2 over 38s)  kubelet            spec.containers{backend}: Back-off pulling image "yatri-backend:non-existent-tag-v999"
+  Warning  Failed     12s (x2 over 38s)  kubelet            spec.containers{backend}: Error: ImagePullBackOff
+
+# the 3 old pods are still Running and still serving — maxUnavailable: 0 did its job
+$ kubectl get pods -l app=yatri-backend -L version
+NAME                             READY   STATUS         RESTARTS   AGE   VERSION
+yatri-backend-77dbb657cd-grpb6   0/1     ErrImagePull   0          41s   broken-v3
+yatri-backend-8478778b59-nd42m   1/1     Running        0          43s   v1
+yatri-backend-8478778b59-p87jn   1/1     Running        0          43s   v1
+yatri-backend-8478778b59-rnkj6   1/1     Running        0          43s   v1
+
+# recover
+$ kubectl rollout undo deployment/yatri-backend
+Warning: resource deployments/yatri-backend was previously managed with 'kubectl apply'. Rolling back will not update the kubectl.kubernetes.io/last-applied-configuration annotation, which may cause unexpected behavior on future 'kubectl apply' operations. Consider using 'kubectl apply' with your previous configuration file instead.
+deployment.apps/yatri-backend rolled back
+
+$ kubectl rollout status deployment/yatri-backend --timeout=120s
+Waiting for deployment "yatri-backend" rollout to finish: 1 old replicas are pending termination...
+deployment "yatri-backend" successfully rolled out
+
+$ kubectl get pods -l app=yatri-backend -L version
+NAME                             READY   STATUS        RESTARTS   AGE   VERSION
+yatri-backend-77dbb657cd-grpb6   0/1     Terminating   0          41s   broken-v3
+yatri-backend-8478778b59-nd42m   1/1     Running       0          43s   v1
+yatri-backend-8478778b59-p87jn   1/1     Running       0          43s   v1
+yatri-backend-8478778b59-rnkj6   1/1     Running       0          43s   v1
+
+$ kubectl rollout history deployment/yatri-backend
+deployment.apps/yatri-backend 
+REVISION  CHANGE-CAUSE
+2         <none>
+3         <none>
+
+
+$ kubectl delete -f troubleshooting/yatri-backend-v1.yaml
+deployment.apps "yatri-backend" deleted from default namespace
+
+
+########## DRILL 2 — immutable selector / template label mismatch ##########
+
+$ cat troubleshooting/selector-mismatch.yaml
+# ==============================================================================
+# INTENTIONALLY BROKEN MANIFEST FOR IMMUTABLE SELECTOR DRILL
+# Demonstrates API server validation error when selector labels do not match pod template labels
+# ==============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: selector-error-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: correct-app-name
+  template:
+    metadata:
+      labels:
+        # BUG: Label does not match selector.matchLabels above!
+        app: wrong-app-name
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+
+$ kubectl apply -f troubleshooting/selector-mismatch.yaml; echo "exit code: $?"
+The Deployment "selector-error-demo" is invalid: spec.template.metadata.labels: Invalid value: {"app":"wrong-app-name"}: `selector` does not match template `labels`
+exit code: 1
+
+# fix: make the template label match the selector, then re-apply
+$ sed 's/app: wrong-app-name/app: correct-app-name/' troubleshooting/selector-mismatch.yaml > /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/selector-fixed.yaml && diff troubleshooting/selector-mismatch.yaml /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/selector-fixed.yaml; true
+19c19
+<         app: wrong-app-name
+---
+>         app: correct-app-name
+
+$ kubectl apply -f /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/selector-fixed.yaml; echo "exit code: $?"
+deployment.apps/selector-error-demo created
+exit code: 0
+
+$ kubectl get deployment selector-error-demo
+NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
+selector-error-demo   0/1     1            0           0s
+
+$ kubectl get pods -l app=correct-app-name
+NAME                                   READY   STATUS              RESTARTS   AGE
+selector-error-demo-54996d6787-7q24v   0/1     ContainerCreating   0          0s
+
+# bonus: the selector is immutable AFTER creation too
+$ kubectl patch deployment selector-error-demo -p '{"spec":{"selector":{"matchLabels":{"app":"another-name"}}}}'; echo "exit code: $?"
+The Deployment "selector-error-demo" is invalid: 
+* spec.template.metadata.labels: Invalid value: {"app":"correct-app-name"}: `selector` does not match template `labels`
+* spec.selector: Invalid value: {"matchLabels":{"app":"another-name"}}: field is immutable
+exit code: 1
+
+$ kubectl delete -f /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/selector-fixed.yaml
+deployment.apps "selector-error-demo" deleted from default namespace
+

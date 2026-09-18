@@ -1,0 +1,288 @@
+
+########## TASK 6A — ReplicaSet: desired count enforcement + self-healing ##########
+
+$ cat replicaset.yml
+apiVersion: apps/v1
+kind: ReplicaSet
+
+metadata:
+  name: nginx-rs
+
+spec:
+  replicas: 3
+
+  selector:
+    matchLabels:
+      app: nginx
+
+  template:
+    metadata:
+      labels:
+        app: nginx
+
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:latest
+          ports:
+            - containerPort: 80
+$ kubectl apply -f replicaset.yml
+replicaset.apps/nginx-rs created
+
+$ kubectl get rs nginx-rs
+NAME       DESIRED   CURRENT   READY   AGE
+nginx-rs   3         3         3       20s
+
+$ kubectl get pods -l app=nginx -o wide
+NAME             READY   STATUS    RESTARTS   AGE   IP            NODE           NOMINATED NODE   READINESS GATES
+nginx-rs-lblk8   1/1     Running   0          20s   10.244.1.19   minikube-m02   <none>           <none>
+nginx-rs-mh8fl   1/1     Running   0          20s   10.244.0.3    minikube       <none>           <none>
+nginx-rs-tjc9c   1/1     Running   0          20s   10.244.1.18   minikube-m02   <none>           <none>
+
+$ kubectl get pods -l app=nginx -o jsonpath='{range .items[*]}{.metadata.name}{"  ownerRef="}{.metadata.ownerReferences[0].kind}/{.metadata.ownerReferences[0].name}{"\n"}{end}'
+nginx-rs-lblk8  ownerRef=ReplicaSet/nginx-rs
+nginx-rs-mh8fl  ownerRef=ReplicaSet/nginx-rs
+nginx-rs-tjc9c  ownerRef=ReplicaSet/nginx-rs
+
+# deleting one pod by hand: nginx-rs-lblk8
+$ kubectl delete pod nginx-rs-lblk8
+pod "nginx-rs-lblk8" deleted from default namespace
+
+$ kubectl get pods -l app=nginx
+NAME             READY   STATUS              RESTARTS   AGE
+nginx-rs-5chkf   0/1     ContainerCreating   0          1s
+nginx-rs-mh8fl   1/1     Running             0          22s
+nginx-rs-tjc9c   1/1     Running             0          22s
+
+$ kubectl get pods -l app=nginx
+NAME             READY   STATUS    RESTARTS   AGE
+nginx-rs-5chkf   1/1     Running   0          14s
+nginx-rs-mh8fl   1/1     Running   0          35s
+nginx-rs-tjc9c   1/1     Running   0          35s
+
+$ kubectl get rs nginx-rs
+NAME       DESIRED   CURRENT   READY   AGE
+nginx-rs   3         3         3       35s
+
+$ kubectl describe rs nginx-rs | sed -n '/Events:/,$p'
+Events:
+  Type    Reason            Age   From                   Message
+  ----    ------            ----  ----                   -------
+  Normal  SuccessfulCreate  35s   replicaset-controller  Created pod: nginx-rs-lblk8
+  Normal  SuccessfulCreate  35s   replicaset-controller  Created pod: nginx-rs-mh8fl
+  Normal  SuccessfulCreate  35s   replicaset-controller  Created pod: nginx-rs-tjc9c
+  Normal  SuccessfulCreate  14s   replicaset-controller  Created pod: nginx-rs-5chkf
+
+$ kubectl delete -f replicaset.yml
+replicaset.apps "nginx-rs" deleted from default namespace
+
+
+########## TASK 6B — StatefulSet: ordinal identity + per-pod PVCs (course manifest, mysql:5.7) ##########
+
+$ cat statefulset.yml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+spec:
+  serviceName: "mysql"  # Required headless service
+  replicas: 3
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:5.7
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: "password"
+          volumeMounts:
+            - name: mysql-persistent-storage
+              mountPath: /var/lib/mysql
+  volumeClaimTemplates:
+    - metadata:
+        name: mysql-persistent-storage
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: 5Gi
+$ kubectl apply -f statefulset.yml
+statefulset.apps/mysql created
+
+$ kubectl get statefulset mysql
+NAME    READY   AGE
+mysql   0/3     40s
+
+$ kubectl get pods -l app=mysql -o wide
+NAME      READY   STATUS         RESTARTS   AGE   IP            NODE           NOMINATED NODE   READINESS GATES
+mysql-0   0/1     ErrImagePull   0          40s   10.244.1.21   minikube-m02   <none>           <none>
+
+$ kubectl get pvc
+NAME                               STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+mysql-persistent-storage-mysql-0   Bound    pvc-eccfcbc1-5f2a-4c05-a955-efdf662fb94d   5Gi        RWO            standard       <unset>                 41s
+
+$ kubectl get pv
+NAME                                       CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                                      STORAGECLASS   VOLUMEATTRIBUTESCLASS   REASON   AGE
+pvc-eccfcbc1-5f2a-4c05-a955-efdf662fb94d   5Gi        RWO            Delete           Bound    default/mysql-persistent-storage-mysql-0   standard       <unset>                          41s
+
+$ kubectl describe pod mysql-0 | sed -n '/Events:/,$p'
+Events:
+  Type     Reason            Age                From               Message
+  ----     ------            ----               ----               -------
+  Warning  FailedScheduling  41s (x4 over 41s)  default-scheduler  0/2 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found
+  Normal   Scheduled         41s                default-scheduler  Successfully assigned default/mysql-0 to minikube-m02
+  Normal   Pulling           26s (x2 over 40s)  kubelet            spec.containers{mysql}: Pulling image "mysql:5.7"
+  Warning  Failed            22s (x2 over 37s)  kubelet            spec.containers{mysql}: Failed to pull image "mysql:5.7": rpc error: code = NotFound desc = failed to pull and unpack image "docker.io/library/mysql:5.7": no match for platform in manifest: not found
+  Warning  Failed            22s (x2 over 37s)  kubelet            spec.containers{mysql}: Error: ErrImagePull
+  Normal   BackOff           10s (x2 over 37s)  kubelet            spec.containers{mysql}: Back-off pulling image "mysql:5.7"
+  Warning  Failed            10s (x2 over 37s)  kubelet            spec.containers{mysql}: Error: ImagePullBackOff
+
+$ kubectl delete -f statefulset.yml
+statefulset.apps "mysql" deleted from default namespace
+
+$ kubectl delete pvc -l app=mysql
+persistentvolumeclaim "mysql-persistent-storage-mysql-0" deleted from default namespace
+
+
+########## TASK 6B(fixed) — same StatefulSet on mysql:8.0 (has an arm64 image), 2 replicas ##########
+
+$ cat /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/statefulset-arm64.yml
+# Same StatefulSet as the course manifest, with two changes for Apple Silicon:
+#   image:    mysql:5.7 -> mysql:8.0   (5.7 publishes no linux/arm64 image)
+#   replicas: 3         -> 2           (this laptop's Docker VM has 3.9 GiB total)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+spec:
+  serviceName: "mysql"
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: "password"
+          volumeMounts:
+            - name: mysql-persistent-storage
+              mountPath: /var/lib/mysql
+  volumeClaimTemplates:
+    - metadata:
+        name: mysql-persistent-storage
+        labels:
+          app: mysql
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: 1Gi
+
+$ kubectl apply -f /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/statefulset-arm64.yml
+statefulset.apps/mysql created
+
+$ kubectl get pods -l app=mysql --no-headers   # t+015s
+mysql-0   0/1   Pending   0     0s
+
+$ kubectl get pods -l app=mysql --no-headers   # t+030s
+mysql-0   0/1   ContainerCreating   0     15s
+
+$ kubectl get pods -l app=mysql --no-headers   # t+045s
+mysql-0   0/1   ContainerCreating   0     30s
+
+$ kubectl get pods -l app=mysql --no-headers   # t+060s
+mysql-0   1/1   Running             0     46s
+mysql-1   0/1   ContainerCreating   0     3s
+
+$ kubectl get pods -l app=mysql --no-headers   # t+075s
+mysql-0   1/1   Running             0     61s
+mysql-1   0/1   ContainerCreating   0     18s
+
+$ kubectl get pods -l app=mysql --no-headers   # t+090s
+mysql-0   1/1   Running             0     76s
+mysql-1   0/1   ContainerCreating   0     33s
+
+$ kubectl get pods -l app=mysql --no-headers   # t+105s
+mysql-0   1/1   Running   0     92s
+mysql-1   1/1   Running   0     49s
+
+$ kubectl get pods -l app=mysql --no-headers   # t+120s
+mysql-0   1/1   Running   0     108s
+mysql-1   1/1   Running   0     65s
+
+$ kubectl get pods -l app=mysql --no-headers   # t+135s
+mysql-0   1/1   Running   0     2m3s
+mysql-1   1/1   Running   0     80s
+
+$ kubectl get pods -l app=mysql --no-headers   # t+150s
+mysql-0   1/1   Running   0     2m18s
+mysql-1   1/1   Running   0     95s
+
+$ kubectl get pods -l app=mysql --no-headers   # t+165s
+mysql-0   1/1   Running   0     2m33s
+mysql-1   1/1   Running   0     110s
+
+$ kubectl get pods -l app=mysql --no-headers   # t+180s
+mysql-0   1/1   Running   0     2m49s
+mysql-1   1/1   Running   0     2m6s
+
+$ kubectl get pods -l app=mysql --no-headers   # t+195s
+mysql-0   1/1   Running   0     3m4s
+mysql-1   1/1   Running   0     2m21s
+
+$ kubectl get pods -l app=mysql --no-headers   # t+210s
+mysql-0   1/1   Running   0     3m19s
+mysql-1   1/1   Running   0     2m36s
+
+$ kubectl get statefulset mysql
+NAME    READY   AGE
+mysql   2/2     3m35s
+
+$ kubectl get pods -l app=mysql -o wide
+NAME      READY   STATUS    RESTARTS   AGE     IP            NODE           NOMINATED NODE   READINESS GATES
+mysql-0   1/1     Running   0          3m35s   10.244.1.22   minikube-m02   <none>           <none>
+mysql-1   1/1     Running   0          2m52s   10.244.0.4    minikube       <none>           <none>
+
+$ kubectl get pvc -o wide
+NAME                               STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE     VOLUMEMODE
+mysql-persistent-storage-mysql-0   Bound    pvc-e005fe9f-733e-4b5e-9bfa-352449aad394   1Gi        RWO            standard       <unset>                 3m35s   Filesystem
+mysql-persistent-storage-mysql-1   Bound    pvc-0cad3e7a-c760-4fc0-b9b4-fac683f67c64   1Gi        RWO            standard       <unset>                 2m52s   Filesystem
+
+# delete mysql-0 and prove the ordinal identity comes back byte-for-byte
+$ kubectl delete pod mysql-0
+pod "mysql-0" deleted from default namespace
+
+$ kubectl get pods -l app=mysql
+NAME      READY   STATUS    RESTARTS   AGE
+mysql-0   1/1     Running   0          25s
+mysql-1   1/1     Running   0          3m19s
+
+$ kubectl get pvc -o wide
+NAME                               STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE     VOLUMEMODE
+mysql-persistent-storage-mysql-0   Bound    pvc-e005fe9f-733e-4b5e-9bfa-352449aad394   1Gi        RWO            standard       <unset>                 4m2s    Filesystem
+mysql-persistent-storage-mysql-1   Bound    pvc-0cad3e7a-c760-4fc0-b9b4-fac683f67c64   1Gi        RWO            standard       <unset>                 3m19s   Filesystem
+
+$ kubectl delete -f /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/statefulset-arm64.yml
+statefulset.apps "mysql" deleted from default namespace
+
+$ kubectl delete pvc -l app=mysql --ignore-not-found
+persistentvolumeclaim "mysql-persistent-storage-mysql-0" deleted from default namespace
+persistentvolumeclaim "mysql-persistent-storage-mysql-1" deleted from default namespace
+

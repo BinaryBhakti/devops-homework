@@ -1,0 +1,45 @@
+
+########## TASK 3 — ErrImagePull -> ImagePullBackOff ##########
+
+$ cat '/Users/ashmit/Desktop/DEV OPs/devops-homework/09-k8s-core-objects/manifests/pod-lifecycle/06-imagepullbackoff.yaml'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lifecycle-image-error
+spec:
+  containers:
+    - name: broken-image
+      image: jakwehrgkaejw:kahsdfgkhj
+
+$ kubectl apply -f '/Users/ashmit/Desktop/DEV OPs/devops-homework/09-k8s-core-objects/manifests/pod-lifecycle/06-imagepullbackoff.yaml'
+pod/lifecycle-image-error created
+
+$ kubectl get pod lifecycle-image-error
+NAME                    READY   STATUS         RESTARTS   AGE
+lifecycle-image-error   0/1     ErrImagePull   0          4s
+
+$ kubectl get pod lifecycle-image-error
+NAME                    READY   STATUS             RESTARTS   AGE
+lifecycle-image-error   0/1     ImagePullBackOff   0          19s
+
+$ kubectl get pod lifecycle-image-error
+NAME                    READY   STATUS         RESTARTS   AGE
+lifecycle-image-error   0/1     ErrImagePull   0          39s
+
+$ kubectl get pod lifecycle-image-error -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}: {.status.containerStatuses[0].state.waiting.message}{"\n"}'
+ErrImagePull: failed to pull and unpack image "docker.io/library/jakwehrgkaejw:kahsdfgkhj": failed to resolve reference "docker.io/library/jakwehrgkaejw:kahsdfgkhj": pull access denied, repository does not exist or may require authorization: server message: insufficient_scope: authorization failed
+
+$ kubectl describe pod lifecycle-image-error | sed -n '/Events:/,$p'
+Events:
+  Type     Reason     Age                From               Message
+  ----     ------     ----               ----               -------
+  Normal   Scheduled  39s                default-scheduler  Successfully assigned default/lifecycle-image-error to minikube-m02
+  Normal   Pulling    22s (x2 over 38s)  kubelet            spec.containers{broken-image}: Pulling image "jakwehrgkaejw:kahsdfgkhj"
+  Warning  Failed     21s (x2 over 37s)  kubelet            spec.containers{broken-image}: Failed to pull image "jakwehrgkaejw:kahsdfgkhj": failed to pull and unpack image "docker.io/library/jakwehrgkaejw:kahsdfgkhj": failed to resolve reference "docker.io/library/jakwehrgkaejw:kahsdfgkhj": pull access denied, repository does not exist or may require authorization: server message: insufficient_scope: authorization failed
+  Warning  Failed     21s (x2 over 37s)  kubelet            spec.containers{broken-image}: Error: ErrImagePull
+  Normal   BackOff    8s (x2 over 36s)   kubelet            spec.containers{broken-image}: Back-off pulling image "jakwehrgkaejw:kahsdfgkhj"
+  Warning  Failed     8s (x2 over 36s)   kubelet            spec.containers{broken-image}: Error: ImagePullBackOff
+
+$ kubectl delete -f '/Users/ashmit/Desktop/DEV OPs/devops-homework/09-k8s-core-objects/manifests/pod-lifecycle/06-imagepullbackoff.yaml'
+pod "lifecycle-image-error" deleted from default namespace
+

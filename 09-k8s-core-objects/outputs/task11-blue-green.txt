@@ -1,0 +1,114 @@
+
+########## TASK 11 — blue-green: deploy both slots, flip the Service selector ##########
+
+$ kubectl apply -f 02-blue-green/deployment-blue.yaml
+deployment.apps/app-blue created
+
+$ kubectl apply -f 02-blue-green/deployment-green.yaml
+deployment.apps/app-green created
+
+$ kubectl rollout status deployment/app-blue --timeout=180s
+Waiting for deployment "app-blue" rollout to finish: 0 of 3 updated replicas are available...
+Waiting for deployment "app-blue" rollout to finish: 1 of 3 updated replicas are available...
+Waiting for deployment "app-blue" rollout to finish: 2 of 3 updated replicas are available...
+deployment "app-blue" successfully rolled out
+
+$ kubectl rollout status deployment/app-green --timeout=180s
+deployment "app-green" successfully rolled out
+
+$ kubectl get pods -l app=myapp --show-labels
+NAME                        READY   STATUS    RESTARTS   AGE   LABELS
+app-blue-5c69d7785c-ngpvt   1/1     Running   0          29s   app=myapp,pod-template-hash=5c69d7785c,slot=blue,version=v1
+app-blue-5c69d7785c-psc9q   1/1     Running   0          29s   app=myapp,pod-template-hash=5c69d7785c,slot=blue,version=v1
+app-blue-5c69d7785c-zhwnt   1/1     Running   0          29s   app=myapp,pod-template-hash=5c69d7785c,slot=blue,version=v1
+app-green-84df7f978-bx6ps   1/1     Running   0          18s   app=myapp,pod-template-hash=84df7f978,slot=green,version=v2
+app-green-84df7f978-mn5wl   1/1     Running   0          18s   app=myapp,pod-template-hash=84df7f978,slot=green,version=v2
+app-green-84df7f978-nwlsb   1/1     Running   0          19s   app=myapp,pod-template-hash=84df7f978,slot=green,version=v2
+
+# route live traffic at BLUE
+$ kubectl apply -f 02-blue-green/service-blue.yaml
+service/myapp-service created
+
+$ kubectl get svc myapp-service
+NAME            TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+myapp-service   NodePort   10.98.168.201   <none>        80:30020/TCP   0s
+
+$ kubectl describe svc myapp-service | grep -E 'Selector|Endpoints|NodePort'
+Selector:                 app=myapp,slot=blue
+Type:                     NodePort
+NodePort:                 http  30020/TCP
+Endpoints:                10.244.1.39:80,10.244.0.13:80,10.244.1.38:80
+
+$ kubectl get endpoints myapp-service
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+NAME            ENDPOINTS                                      AGE
+myapp-service   10.244.0.13:80,10.244.1.38:80,10.244.1.39:80   1s
+
+$ for i in 1..6; do curl -s http://myapp-service | grep ENVIRONMENT; done   # from traffic-client pod
+command terminated with exit code 7
+command terminated with exit code 7
+command terminated with exit code 7
+BLUE ENVIRONMENT
+BLUE ENVIRONMENT
+BLUE ENVIRONMENT
+
+# THE SWITCH — apply service-green.yaml (selector slot: blue -> slot: green)
+$ diff 02-blue-green/service-blue.yaml 02-blue-green/service-green.yaml; true
+1,3c1,2
+< # service-blue.yaml — Service pointing to BLUE (v1) — LIVE traffic
+< # To switch to GREEN: change selector slot: blue -> slot: green
+< # OR apply service-green.yaml directly
+---
+> # service-green.yaml — Service pointing to GREEN (v2) — SWITCHED traffic
+> # Apply this to promote GREEN and route ALL traffic to v2 instantly
+12c11
+<   # THE SWITCH: Change this selector to switch all traffic instantly
+---
+>   # THE SWITCH: Selector flipped to green — all traffic now goes to v2
+15c14
+<     slot: blue     # <-- Currently routing to BLUE (v1)
+---
+>     slot: green    # <-- NOW routing to GREEN (v2)
+
+$ kubectl apply -f 02-blue-green/service-green.yaml
+service/myapp-service configured
+
+$ kubectl describe svc myapp-service | grep -E 'Selector|Endpoints'
+Selector:                 app=myapp,slot=green
+Endpoints:                10.244.1.40:80,10.244.1.41:80,10.244.0.14:80
+
+$ kubectl get endpoints myapp-service
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+NAME            ENDPOINTS                                      AGE
+myapp-service   10.244.0.14:80,10.244.1.40:80,10.244.1.41:80   3s
+
+$ for i in 1..6; do curl -s http://myapp-service | grep ENVIRONMENT; done   # immediately after the flip
+GREEN ENVIRONMENT
+GREEN ENVIRONMENT
+GREEN ENVIRONMENT
+GREEN ENVIRONMENT
+GREEN ENVIRONMENT
+GREEN ENVIRONMENT
+
+# instant rollback — flip the selector back to blue
+$ kubectl apply -f 02-blue-green/service-blue.yaml
+service/myapp-service configured
+
+$ for i in 1..6; do curl -s http://myapp-service | grep ENVIRONMENT; done   # after rollback
+BLUE ENVIRONMENT
+BLUE ENVIRONMENT
+BLUE ENVIRONMENT
+BLUE ENVIRONMENT
+BLUE ENVIRONMENT
+BLUE ENVIRONMENT
+
+# measure how long the flip actually takes
+$ kubectl apply -f 02-blue-green/service-green.yaml >/dev/null; kubectl get endpoints myapp-service -o jsonpath='{.subsets[0].addresses[*].ip}{"\n"}'
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+10.244.0.14 10.244.1.40 10.244.1.41
+
+$ kubectl delete -f 02-blue-green/service-blue.yaml -f 02-blue-green/deployment-blue.yaml -f 02-blue-green/deployment-green.yaml
+service "myapp-service" deleted from default namespace
+deployment.apps "app-blue" deleted from default namespace
+deployment.apps "app-green" deleted from default namespace
+

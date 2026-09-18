@@ -1,0 +1,39 @@
+# Written for this homework, not part of the course repo.
+# troubleshooting/broken-image.yaml upgrades a Deployment called `yatri-backend`,
+# so Drill 1 needs a HEALTHY revision 1 of that Deployment to exist first —
+# otherwise there are no "old pods" left standing to prove the point with.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: yatri-backend
+  labels:
+    app: yatri-backend
+    version: "v1"
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: yatri-backend
+  template:
+    metadata:
+      labels:
+        app: yatri-backend
+        version: "v1"
+    spec:
+      containers:
+        - name: backend
+          image: nginx:1.25-alpine
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: "20m"
+              memory: "32Mi"
+            limits:
+              cpu: "80m"
+              memory: "64Mi"

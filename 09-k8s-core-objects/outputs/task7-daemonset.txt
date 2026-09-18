@@ -1,0 +1,83 @@
+
+########## TASK 7 — DaemonSet: one pod per node ##########
+
+$ cat daemonset/node-agent-ds.yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-logging-agent
+  labels:
+    app: node-logging-agent
+spec:
+  selector:
+    matchLabels:
+      app: node-logging-agent
+  template:
+    metadata:
+      labels:
+        app: node-logging-agent
+    spec:
+      containers:
+        - name: fluent-logger
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do echo \"[$(date)] Collecting host system metrics on $(hostname)\"; sleep 10; done"]
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+            limits:
+              cpu: "50m"
+              memory: "32Mi"
+
+$ kubectl get nodes
+NAME           STATUS   ROLES           AGE   VERSION
+minikube       Ready    control-plane   20m   v1.37.0
+minikube-m02   Ready    <none>          19m   v1.37.0
+
+$ kubectl apply -f daemonset/node-agent-ds.yaml
+daemonset.apps/node-logging-agent created
+
+$ kubectl get ds node-logging-agent
+NAME                 DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR   AGE
+node-logging-agent   2         2         2       2            2           <none>          25s
+
+$ kubectl get pods -l app=node-logging-agent -o wide
+NAME                       READY   STATUS    RESTARTS   AGE   IP            NODE           NOMINATED NODE   READINESS GATES
+node-logging-agent-ncsrg   1/1     Running   0          25s   10.244.0.5    minikube       <none>           <none>
+node-logging-agent-v79pq   1/1     Running   0          25s   10.244.1.24   minikube-m02   <none>           <none>
+
+$ kubectl logs -l app=node-logging-agent --tail=2 --prefix=true
+[pod/node-logging-agent-ncsrg/fluent-logger] [Thu Sep 17 23:46:51 UTC 2026] Collecting host system metrics on node-logging-agent-ncsrg
+[pod/node-logging-agent-ncsrg/fluent-logger] [Thu Sep 17 23:47:01 UTC 2026] Collecting host system metrics on node-logging-agent-ncsrg
+[pod/node-logging-agent-v79pq/fluent-logger] [Thu Sep 17 23:46:55 UTC 2026] Collecting host system metrics on node-logging-agent-v79pq
+[pod/node-logging-agent-v79pq/fluent-logger] [Thu Sep 17 23:47:06 UTC 2026] Collecting host system metrics on node-logging-agent-v79pq
+
+# scheduling proof: the control-plane node is NOT tainted in minikube, so it gets an agent too
+$ kubectl get nodes -o custom-columns='NODE:.metadata.name,TAINTS:.spec.taints'
+NODE           TAINTS
+minikube       <none>
+minikube-m02   <none>
+
+$ kubectl delete -f daemonset/node-agent-ds.yaml
+daemonset.apps "node-logging-agent" deleted from default namespace
+
+# the course also ships deamonset.yml (prom/node-exporter) — same shape, real agent image
+$ cat deamonset.yml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+spec:
+  selector:
+    matchLabels:
+      app: node-exporter
+  template:
+    metadata:
+      labels:
+        app: node-exporter
+    spec:
+      containers:
+        - name: node-exporter
+          image: prom/node-exporter
+          ports:
+            - containerPort: 9100

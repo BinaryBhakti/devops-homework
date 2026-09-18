@@ -1,0 +1,297 @@
+
+########## TASK 13 — Recreate strategy: measured downtime window ##########
+
+$ grep -A3 'strategy:' 04-recreate/deployment-v1.yaml
+  # Recreate strategy: Kubernetes terminates ALL old pods before creating any new pods.
+  # This guarantees no two versions run concurrently, but causes a brief downtime.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+
+$ kubectl apply -f 04-recreate/deployment-v1.yaml
+deployment.apps/app-recreate created
+
+$ kubectl apply -f 04-recreate/service.yaml
+service/app-recreate-service created
+
+$ kubectl rollout status deployment/app-recreate --timeout=180s
+Waiting for deployment "app-recreate" rollout to finish: 0 of 3 updated replicas are available...
+Waiting for deployment "app-recreate" rollout to finish: 1 of 3 updated replicas are available...
+Waiting for deployment "app-recreate" rollout to finish: 2 of 3 updated replicas are available...
+deployment "app-recreate" successfully rolled out
+
+$ kubectl get pods -l app=app-recreate -o wide
+NAME                            READY   STATUS    RESTARTS   AGE   IP            NODE           NOMINATED NODE   READINESS GATES
+app-recreate-6c78cb55bb-4trlk   1/1     Running   0          7s    10.244.1.52   minikube-m02   <none>           <none>
+app-recreate-6c78cb55bb-7hm5h   1/1     Running   0          8s    10.244.1.51   minikube-m02   <none>           <none>
+app-recreate-6c78cb55bb-sg4br   1/1     Running   0          7s    10.244.0.20   minikube       <none>           <none>
+
+# start a 0.5s polling loop from inside the cluster, then trigger the Recreate update
+$ kubectl apply -f 04-recreate/deployment-v2.yaml
+deployment.apps/app-recreate configured
+
+$ kubectl rollout status deployment/app-recreate --timeout=180s
+Waiting for deployment "app-recreate" rollout to finish: 0 out of 3 new replicas have been updated...
+Waiting for deployment "app-recreate" rollout to finish: 0 out of 3 new replicas have been updated...
+Waiting for deployment "app-recreate" rollout to finish: 0 out of 3 new replicas have been updated...
+Waiting for deployment "app-recreate" rollout to finish: 0 out of 3 new replicas have been updated...
+Waiting for deployment "app-recreate" rollout to finish: 0 of 3 updated replicas are available...
+Waiting for deployment "app-recreate" rollout to finish: 1 of 3 updated replicas are available...
+Waiting for deployment "app-recreate" rollout to finish: 2 of 3 updated replicas are available...
+deployment "app-recreate" successfully rolled out
+
+# the polling loop (one line every 0.5s):
+23:56:49  VERSION: v1
+23:56:50  VERSION: v1
+23:56:50  VERSION: v1
+23:56:51  VERSION: v1
+23:56:51  VERSION: v1
+23:56:52  VERSION: v1
+23:56:52  VERSION: v1
+23:56:53  VERSION: v1
+23:56:53  VERSION: v1
+23:56:54  VERSION: v1
+23:56:54  VERSION: v1
+23:56:55  VERSION: v1
+23:56:55  [OUTAGE] no endpoint / connection refused
+23:56:57  [OUTAGE] no endpoint / connection refused
+23:56:57  [OUTAGE] no endpoint / connection refused
+23:56:58  [OUTAGE] no endpoint / connection refused
+23:56:58  VERSION: v2 (UPGRADED)
+23:56:59  VERSION: v2 (UPGRADED)
+23:56:59  VERSION: v2 (UPGRADED)
+23:57:00  VERSION: v2 (UPGRADED)
+23:57:00  VERSION: v2 (UPGRADED)
+23:57:01  VERSION: v2 (UPGRADED)
+23:57:02  VERSION: v2 (UPGRADED)
+23:57:02  VERSION: v2 (UPGRADED)
+23:57:03  VERSION: v2 (UPGRADED)
+23:57:03  VERSION: v2 (UPGRADED)
+23:57:04  VERSION: v2 (UPGRADED)
+23:57:04  VERSION: v2 (UPGRADED)
+23:57:05  VERSION: v2 (UPGRADED)
+23:57:05  VERSION: v2 (UPGRADED)
+23:57:06  VERSION: v2 (UPGRADED)
+23:57:06  VERSION: v2 (UPGRADED)
+23:57:07  VERSION: v2 (UPGRADED)
+23:57:07  VERSION: v2 (UPGRADED)
+23:57:08  VERSION: v2 (UPGRADED)
+23:57:08  VERSION: v2 (UPGRADED)
+23:57:09  VERSION: v2 (UPGRADED)
+23:57:09  VERSION: v2 (UPGRADED)
+23:57:10  VERSION: v2 (UPGRADED)
+23:57:10  VERSION: v2 (UPGRADED)
+23:57:11  VERSION: v2 (UPGRADED)
+23:57:11  VERSION: v2 (UPGRADED)
+23:57:12  VERSION: v2 (UPGRADED)
+23:57:13  VERSION: v2 (UPGRADED)
+23:57:13  VERSION: v2 (UPGRADED)
+23:57:14  VERSION: v2 (UPGRADED)
+23:57:14  VERSION: v2 (UPGRADED)
+23:57:15  VERSION: v2 (UPGRADED)
+23:57:15  VERSION: v2 (UPGRADED)
+23:57:16  VERSION: v2 (UPGRADED)
+23:57:16  VERSION: v2 (UPGRADED)
+23:57:17  VERSION: v2 (UPGRADED)
+23:57:17  VERSION: v2 (UPGRADED)
+23:57:18  VERSION: v2 (UPGRADED)
+23:57:18  VERSION: v2 (UPGRADED)
+23:57:19  VERSION: v2 (UPGRADED)
+23:57:19  VERSION: v2 (UPGRADED)
+23:57:20  VERSION: v2 (UPGRADED)
+23:57:20  VERSION: v2 (UPGRADED)
+23:57:21  VERSION: v2 (UPGRADED)
+23:57:21  VERSION: v2 (UPGRADED)
+23:57:22  VERSION: v2 (UPGRADED)
+23:57:22  VERSION: v2 (UPGRADED)
+23:57:23  VERSION: v2 (UPGRADED)
+23:57:23  VERSION: v2 (UPGRADED)
+23:57:24  VERSION: v2 (UPGRADED)
+23:57:24  VERSION: v2 (UPGRADED)
+23:57:25  VERSION: v2 (UPGRADED)
+23:57:26  VERSION: v2 (UPGRADED)
+23:57:26  VERSION: v2 (UPGRADED)
+23:57:27  VERSION: v2 (UPGRADED)
+23:57:27  VERSION: v2 (UPGRADED)
+23:57:28  VERSION: v2 (UPGRADED)
+23:57:28  VERSION: v2 (UPGRADED)
+23:57:29  VERSION: v2 (UPGRADED)
+23:57:29  VERSION: v2 (UPGRADED)
+23:57:30  VERSION: v2 (UPGRADED)
+23:57:30  VERSION: v2 (UPGRADED)
+23:57:31  VERSION: v2 (UPGRADED)
+23:57:31  VERSION: v2 (UPGRADED)
+23:57:32  VERSION: v2 (UPGRADED)
+23:57:32  VERSION: v2 (UPGRADED)
+23:57:33  VERSION: v2 (UPGRADED)
+23:57:33  VERSION: v2 (UPGRADED)
+23:57:34  VERSION: v2 (UPGRADED)
+23:57:34  VERSION: v2 (UPGRADED)
+23:57:35  VERSION: v2 (UPGRADED)
+23:57:35  VERSION: v2 (UPGRADED)
+23:57:36  VERSION: v2 (UPGRADED)
+23:57:36  VERSION: v2 (UPGRADED)
+23:57:37  VERSION: v2 (UPGRADED)
+23:57:38  VERSION: v2 (UPGRADED)
+23:57:38  VERSION: v2 (UPGRADED)
+23:57:39  VERSION: v2 (UPGRADED)
+23:57:39  VERSION: v2 (UPGRADED)
+23:57:40  VERSION: v2 (UPGRADED)
+23:57:40  VERSION: v2 (UPGRADED)
+23:57:41  VERSION: v2 (UPGRADED)
+23:57:41  VERSION: v2 (UPGRADED)
+23:57:42  VERSION: v2 (UPGRADED)
+23:57:42  VERSION: v2 (UPGRADED)
+23:57:43  VERSION: v2 (UPGRADED)
+23:57:43  VERSION: v2 (UPGRADED)
+23:57:44  VERSION: v2 (UPGRADED)
+23:57:44  VERSION: v2 (UPGRADED)
+23:57:45  VERSION: v2 (UPGRADED)
+23:57:45  VERSION: v2 (UPGRADED)
+23:57:46  VERSION: v2 (UPGRADED)
+23:57:46  VERSION: v2 (UPGRADED)
+23:57:47  VERSION: v2 (UPGRADED)
+23:57:47  VERSION: v2 (UPGRADED)
+23:57:48  VERSION: v2 (UPGRADED)
+23:57:48  VERSION: v2 (UPGRADED)
+23:57:49  VERSION: v2 (UPGRADED)
+23:57:49  VERSION: v2 (UPGRADED)
+23:57:50  VERSION: v2 (UPGRADED)
+23:57:50  VERSION: v2 (UPGRADED)
+23:57:51  VERSION: v2 (UPGRADED)
+23:57:52  VERSION: v2 (UPGRADED)
+23:57:52  VERSION: v2 (UPGRADED)
+23:57:53  VERSION: v2 (UPGRADED)
+23:57:53  VERSION: v2 (UPGRADED)
+23:57:54  VERSION: v2 (UPGRADED)
+23:57:54  VERSION: v2 (UPGRADED)
+23:57:55  VERSION: v2 (UPGRADED)
+23:57:55  VERSION: v2 (UPGRADED)
+23:57:56  VERSION: v2 (UPGRADED)
+23:57:56  VERSION: v2 (UPGRADED)
+23:57:57  VERSION: v2 (UPGRADED)
+23:57:57  VERSION: v2 (UPGRADED)
+23:57:58  VERSION: v2 (UPGRADED)
+23:57:58  VERSION: v2 (UPGRADED)
+23:57:59  VERSION: v2 (UPGRADED)
+23:57:59  VERSION: v2 (UPGRADED)
+23:58:00  VERSION: v2 (UPGRADED)
+23:58:00  VERSION: v2 (UPGRADED)
+23:58:01  VERSION: v2 (UPGRADED)
+23:58:01  VERSION: v2 (UPGRADED)
+23:58:02  VERSION: v2 (UPGRADED)
+23:58:02  VERSION: v2 (UPGRADED)
+23:58:03  VERSION: v2 (UPGRADED)
+23:58:03  VERSION: v2 (UPGRADED)
+23:58:04  VERSION: v2 (UPGRADED)
+23:58:05  VERSION: v2 (UPGRADED)
+23:58:05  VERSION: v2 (UPGRADED)
+23:58:06  VERSION: v2 (UPGRADED)
+23:58:06  VERSION: v2 (UPGRADED)
+23:58:07  VERSION: v2 (UPGRADED)
+23:58:07  VERSION: v2 (UPGRADED)
+23:58:08  VERSION: v2 (UPGRADED)
+23:58:08  VERSION: v2 (UPGRADED)
+23:58:09  VERSION: v2 (UPGRADED)
+23:58:09  VERSION: v2 (UPGRADED)
+23:58:10  VERSION: v2 (UPGRADED)
+23:58:10  VERSION: v2 (UPGRADED)
+23:58:11  VERSION: v2 (UPGRADED)
+23:58:11  VERSION: v2 (UPGRADED)
+23:58:12  VERSION: v2 (UPGRADED)
+23:58:12  VERSION: v2 (UPGRADED)
+23:58:13  VERSION: v2 (UPGRADED)
+23:58:13  VERSION: v2 (UPGRADED)
+23:58:14  VERSION: v2 (UPGRADED)
+23:58:14  VERSION: v2 (UPGRADED)
+23:58:15  VERSION: v2 (UPGRADED)
+23:58:16  VERSION: v2 (UPGRADED)
+23:58:16  VERSION: v2 (UPGRADED)
+23:58:17  VERSION: v2 (UPGRADED)
+23:58:17  VERSION: v2 (UPGRADED)
+23:58:18  VERSION: v2 (UPGRADED)
+23:58:18  VERSION: v2 (UPGRADED)
+
+# outage length, measured from the loop:
+$ grep -c OUTAGE recreate-loop.txt
+4
+
+# pod watch during the same window:
+NAME                            READY   STATUS    RESTARTS   AGE
+app-recreate-6c78cb55bb-4trlk   1/1     Running   0          13s
+app-recreate-6c78cb55bb-7hm5h   1/1     Running   0          14s
+app-recreate-6c78cb55bb-sg4br   1/1     Running   0          13s
+app-recreate-6c78cb55bb-sg4br   1/1     Terminating   0          13s
+app-recreate-6c78cb55bb-4trlk   1/1     Terminating   0          13s
+app-recreate-6c78cb55bb-7hm5h   1/1     Terminating   0          14s
+app-recreate-6c78cb55bb-sg4br   1/1     Terminating   0          13s
+app-recreate-6c78cb55bb-7hm5h   1/1     Terminating   0          14s
+app-recreate-6c78cb55bb-4trlk   1/1     Terminating   0          13s
+app-recreate-6c78cb55bb-7hm5h   0/1     Completed     0          15s
+app-recreate-6c78cb55bb-sg4br   0/1     Completed     0          14s
+app-recreate-6c78cb55bb-4trlk   0/1     Completed     0          14s
+app-recreate-7bd8d89b8b-crmfv   0/1     Pending       0          0s
+app-recreate-6c78cb55bb-7hm5h   0/1     Completed     0          15s
+app-recreate-7bd8d89b8b-crmfv   0/1     Pending       0          0s
+app-recreate-6c78cb55bb-7hm5h   0/1     Completed     0          15s
+app-recreate-7bd8d89b8b-ddmfx   0/1     Pending       0          0s
+app-recreate-7bd8d89b8b-62lml   0/1     Pending       0          0s
+app-recreate-7bd8d89b8b-ddmfx   0/1     Pending       0          0s
+app-recreate-7bd8d89b8b-62lml   0/1     Pending       0          0s
+app-recreate-6c78cb55bb-4trlk   0/1     Completed     0          14s
+app-recreate-6c78cb55bb-4trlk   0/1     Completed     0          14s
+app-recreate-7bd8d89b8b-ddmfx   0/1     ContainerCreating   0          0s
+app-recreate-7bd8d89b8b-crmfv   0/1     ContainerCreating   0          0s
+app-recreate-7bd8d89b8b-62lml   0/1     ContainerCreating   0          0s
+app-recreate-6c78cb55bb-sg4br   0/1     Completed           0          15s
+app-recreate-6c78cb55bb-sg4br   0/1     Completed           0          15s
+app-recreate-7bd8d89b8b-62lml   0/1     ContainerCreating   0          1s
+app-recreate-7bd8d89b8b-crmfv   0/1     ContainerCreating   0          1s
+app-recreate-7bd8d89b8b-ddmfx   0/1     ContainerCreating   0          1s
+app-recreate-7bd8d89b8b-62lml   1/1     Running             0          2s
+app-recreate-7bd8d89b8b-ddmfx   1/1     Running             0          2s
+app-recreate-7bd8d89b8b-crmfv   1/1     Running             0          2s
+
+$ kubectl get pods -l app=app-recreate
+NAME                            READY   STATUS    RESTARTS   AGE
+app-recreate-7bd8d89b8b-62lml   1/1     Running   0          83s
+app-recreate-7bd8d89b8b-crmfv   1/1     Running   0          83s
+app-recreate-7bd8d89b8b-ddmfx   1/1     Running   0          83s
+
+$ kubectl rollout history deployment/app-recreate
+deployment.apps/app-recreate 
+REVISION  CHANGE-CAUSE
+1         <none>
+2         <none>
+
+
+$ kubectl rollout undo deployment/app-recreate
+Warning: resource deployments/app-recreate was previously managed with 'kubectl apply'. Rolling back will not update the kubectl.kubernetes.io/last-applied-configuration annotation, which may cause unexpected behavior on future 'kubectl apply' operations. Consider using 'kubectl apply' with your previous configuration file instead.
+deployment.apps/app-recreate rolled back
+
+$ kubectl rollout status deployment/app-recreate --timeout=180s
+Waiting for deployment "app-recreate" rollout to finish: 0 out of 3 new replicas have been updated...
+Waiting for deployment "app-recreate" rollout to finish: 0 out of 3 new replicas have been updated...
+Waiting for deployment "app-recreate" rollout to finish: 0 out of 3 new replicas have been updated...
+Waiting for deployment "app-recreate" rollout to finish: 0 out of 3 new replicas have been updated...
+Waiting for deployment "app-recreate" rollout to finish: 0 out of 3 new replicas have been updated...
+Waiting for deployment "app-recreate" rollout to finish: 0 out of 3 new replicas have been updated...
+Waiting for deployment "app-recreate" rollout to finish: 0 of 3 updated replicas are available...
+Waiting for deployment "app-recreate" rollout to finish: 1 of 3 updated replicas are available...
+Waiting for deployment "app-recreate" rollout to finish: 2 of 3 updated replicas are available...
+deployment "app-recreate" successfully rolled out
+
+$ kubectl get pods -l app=app-recreate --show-labels
+NAME                            READY   STATUS    RESTARTS   AGE   LABELS
+app-recreate-6c78cb55bb-25xwn   1/1     Running   0          3s    app=app-recreate,pod-template-hash=6c78cb55bb,version=v1
+app-recreate-6c78cb55bb-44m5t   1/1     Running   0          3s    app=app-recreate,pod-template-hash=6c78cb55bb,version=v1
+app-recreate-6c78cb55bb-5dgds   1/1     Running   0          3s    app=app-recreate,pod-template-hash=6c78cb55bb,version=v1
+
+$ kubectl delete -f 04-recreate/service.yaml -f 04-recreate/deployment-v2.yaml
+service "app-recreate-service" deleted from default namespace
+deployment.apps "app-recreate" deleted from default namespace
+
+$ kubectl delete pod traffic-client
+pod "traffic-client" deleted from default namespace
+

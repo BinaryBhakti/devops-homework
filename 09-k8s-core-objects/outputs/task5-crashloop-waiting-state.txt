@@ -1,0 +1,91 @@
+
+########## 5.5 addendum — catching the container in state.waiting = CrashLoopBackOff ##########
+
+$ kubectl apply -f pod-lifecycle/05-crashloopbackoff.yaml
+pod/lifecycle-crashloop created
+
+# poll the container state every 2s and print whichever of running/terminated/waiting is set
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+002s
+restarts=0 state={"waiting":{"reason":"ContainerCreating"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+004s
+restarts=0 state={"running":{"startedAt":"2026-09-17T23:59:14Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+006s
+restarts=1 state={"running":{"startedAt":"2026-09-17T23:59:17Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+008s
+restarts=1 state={"running":{"startedAt":"2026-09-17T23:59:17Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+010s
+restarts=1 state={"terminated":{"containerID":"containerd://e4bc7f0838b2efdb85352e8c1e0ec962c9df35d174927507653819d5b8f33bb4","exitCode":1,"finishedAt":"2026-09-17T23:59:20Z","reason":"Error","startedAt":"2026-09-17T23:59:17Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+012s
+restarts=1 state={"terminated":{"containerID":"containerd://e4bc7f0838b2efdb85352e8c1e0ec962c9df35d174927507653819d5b8f33bb4","exitCode":1,"finishedAt":"2026-09-17T23:59:20Z","reason":"Error","startedAt":"2026-09-17T23:59:17Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+014s
+restarts=1 state={"terminated":{"containerID":"containerd://e4bc7f0838b2efdb85352e8c1e0ec962c9df35d174927507653819d5b8f33bb4","exitCode":1,"finishedAt":"2026-09-17T23:59:20Z","reason":"Error","startedAt":"2026-09-17T23:59:17Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+016s
+restarts=1 state={"terminated":{"containerID":"containerd://e4bc7f0838b2efdb85352e8c1e0ec962c9df35d174927507653819d5b8f33bb4","exitCode":1,"finishedAt":"2026-09-17T23:59:20Z","reason":"Error","startedAt":"2026-09-17T23:59:17Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+018s
+restarts=1 state={"terminated":{"containerID":"containerd://e4bc7f0838b2efdb85352e8c1e0ec962c9df35d174927507653819d5b8f33bb4","exitCode":1,"finishedAt":"2026-09-17T23:59:20Z","reason":"Error","startedAt":"2026-09-17T23:59:17Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+020s
+restarts=2 state={"running":{"startedAt":"2026-09-17T23:59:32Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+022s
+restarts=2 state={"running":{"startedAt":"2026-09-17T23:59:32Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+024s
+restarts=2 state={"terminated":{"containerID":"containerd://d438d9fb2a4789ff708811db49bb8bb18bbc41f4ca9c7105ec20ae7a2ef5f0dd","exitCode":1,"finishedAt":"2026-09-17T23:59:35Z","reason":"Error","startedAt":"2026-09-17T23:59:32Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+026s
+restarts=2 state={"terminated":{"containerID":"containerd://d438d9fb2a4789ff708811db49bb8bb18bbc41f4ca9c7105ec20ae7a2ef5f0dd","exitCode":1,"finishedAt":"2026-09-17T23:59:35Z","reason":"Error","startedAt":"2026-09-17T23:59:32Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+028s
+restarts=2 state={"terminated":{"containerID":"containerd://d438d9fb2a4789ff708811db49bb8bb18bbc41f4ca9c7105ec20ae7a2ef5f0dd","exitCode":1,"finishedAt":"2026-09-17T23:59:35Z","reason":"Error","startedAt":"2026-09-17T23:59:32Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+030s
+restarts=2 state={"terminated":{"containerID":"containerd://d438d9fb2a4789ff708811db49bb8bb18bbc41f4ca9c7105ec20ae7a2ef5f0dd","exitCode":1,"finishedAt":"2026-09-17T23:59:35Z","reason":"Error","startedAt":"2026-09-17T23:59:32Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+032s
+restarts=2 state={"terminated":{"containerID":"containerd://d438d9fb2a4789ff708811db49bb8bb18bbc41f4ca9c7105ec20ae7a2ef5f0dd","exitCode":1,"finishedAt":"2026-09-17T23:59:35Z","reason":"Error","startedAt":"2026-09-17T23:59:32Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+034s
+restarts=2 state={"terminated":{"containerID":"containerd://d438d9fb2a4789ff708811db49bb8bb18bbc41f4ca9c7105ec20ae7a2ef5f0dd","exitCode":1,"finishedAt":"2026-09-17T23:59:35Z","reason":"Error","startedAt":"2026-09-17T23:59:32Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+036s
+restarts=2 state={"terminated":{"containerID":"containerd://d438d9fb2a4789ff708811db49bb8bb18bbc41f4ca9c7105ec20ae7a2ef5f0dd","exitCode":1,"finishedAt":"2026-09-17T23:59:35Z","reason":"Error","startedAt":"2026-09-17T23:59:32Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+038s
+restarts=2 state={"terminated":{"containerID":"containerd://d438d9fb2a4789ff708811db49bb8bb18bbc41f4ca9c7105ec20ae7a2ef5f0dd","exitCode":1,"finishedAt":"2026-09-17T23:59:35Z","reason":"Error","startedAt":"2026-09-17T23:59:32Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+040s
+restarts=2 state={"terminated":{"containerID":"containerd://d438d9fb2a4789ff708811db49bb8bb18bbc41f4ca9c7105ec20ae7a2ef5f0dd","exitCode":1,"finishedAt":"2026-09-17T23:59:35Z","reason":"Error","startedAt":"2026-09-17T23:59:32Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+042s
+restarts=2 state={"terminated":{"containerID":"containerd://d438d9fb2a4789ff708811db49bb8bb18bbc41f4ca9c7105ec20ae7a2ef5f0dd","exitCode":1,"finishedAt":"2026-09-17T23:59:35Z","reason":"Error","startedAt":"2026-09-17T23:59:32Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+044s
+restarts=2 state={"terminated":{"containerID":"containerd://d438d9fb2a4789ff708811db49bb8bb18bbc41f4ca9c7105ec20ae7a2ef5f0dd","exitCode":1,"finishedAt":"2026-09-17T23:59:35Z","reason":"Error","startedAt":"2026-09-17T23:59:32Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+046s
+restarts=2 state={"terminated":{"containerID":"containerd://d438d9fb2a4789ff708811db49bb8bb18bbc41f4ca9c7105ec20ae7a2ef5f0dd","exitCode":1,"finishedAt":"2026-09-17T23:59:35Z","reason":"Error","startedAt":"2026-09-17T23:59:32Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+048s
+restarts=2 state={"terminated":{"containerID":"containerd://d438d9fb2a4789ff708811db49bb8bb18bbc41f4ca9c7105ec20ae7a2ef5f0dd","exitCode":1,"finishedAt":"2026-09-17T23:59:35Z","reason":"Error","startedAt":"2026-09-17T23:59:32Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+050s
+restarts=2 state={"terminated":{"containerID":"containerd://d438d9fb2a4789ff708811db49bb8bb18bbc41f4ca9c7105ec20ae7a2ef5f0dd","exitCode":1,"finishedAt":"2026-09-17T23:59:35Z","reason":"Error","startedAt":"2026-09-17T23:59:32Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+052s
+restarts=3 state={"running":{"startedAt":"2026-09-18T00:00:05Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+054s
+restarts=3 state={"running":{"startedAt":"2026-09-18T00:00:05Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+056s
+restarts=3 state={"terminated":{"containerID":"containerd://bca50181fc1f199196a37f638e37eec2ce3b11867dc91ccb01d12189cae7ccb8","exitCode":1,"finishedAt":"2026-09-18T00:00:08Z","reason":"Error","startedAt":"2026-09-18T00:00:05Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+058s
+restarts=3 state={"terminated":{"containerID":"containerd://bca50181fc1f199196a37f638e37eec2ce3b11867dc91ccb01d12189cae7ccb8","exitCode":1,"finishedAt":"2026-09-18T00:00:08Z","reason":"Error","startedAt":"2026-09-18T00:00:05Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+060s
+restarts=3 state={"terminated":{"containerID":"containerd://bca50181fc1f199196a37f638e37eec2ce3b11867dc91ccb01d12189cae7ccb8","exitCode":1,"finishedAt":"2026-09-18T00:00:08Z","reason":"Error","startedAt":"2026-09-18T00:00:05Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+062s
+restarts=3 state={"terminated":{"containerID":"containerd://bca50181fc1f199196a37f638e37eec2ce3b11867dc91ccb01d12189cae7ccb8","exitCode":1,"finishedAt":"2026-09-18T00:00:08Z","reason":"Error","startedAt":"2026-09-18T00:00:05Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+064s
+restarts=3 state={"terminated":{"containerID":"containerd://bca50181fc1f199196a37f638e37eec2ce3b11867dc91ccb01d12189cae7ccb8","exitCode":1,"finishedAt":"2026-09-18T00:00:08Z","reason":"Error","startedAt":"2026-09-18T00:00:05Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+066s
+restarts=3 state={"terminated":{"containerID":"containerd://bca50181fc1f199196a37f638e37eec2ce3b11867dc91ccb01d12189cae7ccb8","exitCode":1,"finishedAt":"2026-09-18T00:00:08Z","reason":"Error","startedAt":"2026-09-18T00:00:05Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+068s
+restarts=3 state={"terminated":{"containerID":"containerd://bca50181fc1f199196a37f638e37eec2ce3b11867dc91ccb01d12189cae7ccb8","exitCode":1,"finishedAt":"2026-09-18T00:00:08Z","reason":"Error","startedAt":"2026-09-18T00:00:05Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+070s
+restarts=3 state={"terminated":{"containerID":"containerd://bca50181fc1f199196a37f638e37eec2ce3b11867dc91ccb01d12189cae7ccb8","exitCode":1,"finishedAt":"2026-09-18T00:00:08Z","reason":"Error","startedAt":"2026-09-18T00:00:05Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+072s
+restarts=3 state={"terminated":{"containerID":"containerd://bca50181fc1f199196a37f638e37eec2ce3b11867dc91ccb01d12189cae7ccb8","exitCode":1,"finishedAt":"2026-09-18T00:00:08Z","reason":"Error","startedAt":"2026-09-18T00:00:05Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+074s
+restarts=3 state={"terminated":{"containerID":"containerd://bca50181fc1f199196a37f638e37eec2ce3b11867dc91ccb01d12189cae7ccb8","exitCode":1,"finishedAt":"2026-09-18T00:00:08Z","reason":"Error","startedAt":"2026-09-18T00:00:05Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+076s
+restarts=3 state={"terminated":{"containerID":"containerd://bca50181fc1f199196a37f638e37eec2ce3b11867dc91ccb01d12189cae7ccb8","exitCode":1,"finishedAt":"2026-09-18T00:00:08Z","reason":"Error","startedAt":"2026-09-18T00:00:05Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+078s
+restarts=3 state={"terminated":{"containerID":"containerd://bca50181fc1f199196a37f638e37eec2ce3b11867dc91ccb01d12189cae7ccb8","exitCode":1,"finishedAt":"2026-09-18T00:00:08Z","reason":"Error","startedAt":"2026-09-18T00:00:05Z"}} 
+$ kubectl get pod lifecycle-crashloop -o jsonpath=... # t+080s
+restarts=3 state={"terminated":{"containerID":"containerd://bca50181fc1f199196a37f638e37eec2ce3b11867dc91ccb01d12189cae7ccb8","exitCode":1,"finishedAt":"2026-09-18T00:00:08Z","reason":"Error","startedAt":"2026-09-18T00:00:05Z"}} 
+
+$ kubectl delete -f pod-lifecycle/05-crashloopbackoff.yaml
+pod "lifecycle-crashloop" deleted from default namespace
+

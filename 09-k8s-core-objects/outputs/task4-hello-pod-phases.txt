@@ -1,0 +1,106 @@
+
+########## TASK 4 — transient pod lifecycle stages (hello.yml) ##########
+
+$ cat hello.yml
+apiVersion: v1
+kind: Pod
+
+metadata:
+  name: hello-pod
+
+spec:
+  restartPolicy: Never
+
+  containers:
+    - name: hello
+      image: busybox
+      command: ["sh", "-c", "echo Hello Kubernetes"]
+# pre-pull busybox on both nodes first, so the Running phase is not hidden behind the image pull
+$ kubectl run warm-busybox --image=busybox:latest --restart=Never --command -- true; kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/warm-busybox --timeout=120s; kubectl delete pod warm-busybox
+pod/warm-busybox created
+pod/warm-busybox condition met
+pod "warm-busybox" deleted from default namespace
+
+# terminal 1: kubectl get pods -w, started BEFORE the apply
+# terminal 2: create the pod, then poll every 0.3s
+$ kubectl apply -f hello.yml
+pod/hello-pod created
+
+$ kubectl get pod hello-pod --no-headers   # poll 01
+hello-pod   0/1   ContainerCreating   0     0s
+$ kubectl get pod hello-pod --no-headers   # poll 02
+hello-pod   0/1   ContainerCreating   0     1s
+$ kubectl get pod hello-pod --no-headers   # poll 03
+hello-pod   0/1   ContainerCreating   0     1s
+$ kubectl get pod hello-pod --no-headers   # poll 04
+hello-pod   0/1   ContainerCreating   0     2s
+$ kubectl get pod hello-pod --no-headers   # poll 05
+hello-pod   0/1   ContainerCreating   0     2s
+$ kubectl get pod hello-pod --no-headers   # poll 06
+hello-pod   0/1   ContainerCreating   0     2s
+$ kubectl get pod hello-pod --no-headers   # poll 07
+hello-pod   1/1   Running   0     3s
+$ kubectl get pod hello-pod --no-headers   # poll 08
+hello-pod   0/1   Completed   0     3s
+$ kubectl get pod hello-pod --no-headers   # poll 09
+hello-pod   0/1   Completed   0     3s
+$ kubectl get pod hello-pod --no-headers   # poll 10
+hello-pod   0/1   Completed   0     4s
+$ kubectl get pod hello-pod --no-headers   # poll 11
+hello-pod   0/1   Completed   0     4s
+$ kubectl get pod hello-pod --no-headers   # poll 12
+hello-pod   0/1   Completed   0     5s
+$ kubectl get pod hello-pod --no-headers   # poll 13
+hello-pod   0/1   Completed   0     5s
+$ kubectl get pod hello-pod --no-headers   # poll 14
+hello-pod   0/1   Completed   0     5s
+$ kubectl get pod hello-pod --no-headers   # poll 15
+hello-pod   0/1   Completed   0     6s
+$ kubectl get pod hello-pod --no-headers   # poll 16
+hello-pod   0/1   Completed   0     6s
+$ kubectl get pod hello-pod --no-headers   # poll 17
+hello-pod   0/1   Completed   0     7s
+$ kubectl get pod hello-pod --no-headers   # poll 18
+hello-pod   0/1   Completed   0     7s
+$ kubectl get pod hello-pod --no-headers   # poll 19
+hello-pod   0/1   Completed   0     7s
+$ kubectl get pod hello-pod --no-headers   # poll 20
+hello-pod   0/1   Completed   0     8s
+$ kubectl get pod hello-pod --no-headers   # poll 21
+hello-pod   0/1   Completed   0     8s
+$ kubectl get pod hello-pod --no-headers   # poll 22
+hello-pod   0/1   Completed   0     8s
+$ kubectl get pod hello-pod --no-headers   # poll 23
+hello-pod   0/1   Completed   0     9s
+$ kubectl get pod hello-pod --no-headers   # poll 24
+hello-pod   0/1   Completed   0     9s
+
+# terminal 1 transcript — every phase transition the API server emitted:
+NAME        READY   STATUS    RESTARTS   AGE
+hello-pod   0/1     Pending   0          0s
+hello-pod   0/1     Pending   0          0s
+hello-pod   0/1     ContainerCreating   0          0s
+hello-pod   0/1     ContainerCreating   0          1s
+hello-pod   1/1     Running             0          2s
+hello-pod   0/1     Completed           0          3s
+hello-pod   0/1     Completed           0          4s
+
+$ kubectl get pod hello-pod -o jsonpath='phase={.status.phase} exitCode={.status.containerStatuses[0].state.terminated.exitCode} reason={.status.containerStatuses[0].state.terminated.reason} started={.status.containerStatuses[0].state.terminated.startedAt} finished={.status.containerStatuses[0].state.terminated.finishedAt}{"\n"}'
+phase=Succeeded exitCode=0 reason=Completed started=2026-09-17T23:32:22Z finished=2026-09-17T23:32:22Z
+
+$ kubectl logs hello-pod
+Hello Kubernetes
+
+$ kubectl describe pod hello-pod | sed -n '/Events:/,$p'
+Events:
+  Type    Reason     Age   From               Message
+  ----    ------     ----  ----               -------
+  Normal  Scheduled  14s   default-scheduler  Successfully assigned default/hello-pod to minikube-m02
+  Normal  Pulling    13s   kubelet            spec.containers{hello}: Pulling image "busybox"
+  Normal  Pulled     12s   kubelet            spec.containers{hello}: Successfully pulled image "busybox" in 1.42s (1.42s including waiting). Image size: 1925780 bytes.
+  Normal  Created    12s   kubelet            spec.containers{hello}: Container created
+  Normal  Started    12s   kubelet            spec.containers{hello}: Container started
+
+$ kubectl delete -f hello.yml
+pod "hello-pod" deleted from default namespace
+

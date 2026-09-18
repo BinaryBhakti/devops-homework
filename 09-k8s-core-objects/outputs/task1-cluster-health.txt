@@ -1,0 +1,23 @@
+
+########## TASK 1 — cluster health & baseline checks ##########
+
+$ kubectl version
+Client Version: v1.36.1
+Kustomize Version: v5.8.1
+Server Version: v1.37.0
+
+$ kubectl cluster-info
+Kubernetes control plane is running at https://127.0.0.1:59830
+CoreDNS is running at https://127.0.0.1:59830/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+
+To further debug and diagnose cluster problems, use 'kubectl cluster-info dump'.
+
+$ kubectl get nodes -o wide
+NAME           STATUS   ROLES           AGE     VERSION   INTERNAL-IP    EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION            CONTAINER-RUNTIME
+minikube       Ready    control-plane   2m14s   v1.37.0   192.168.49.2   <none>        Debian GNU/Linux 12 (bookworm)   7.0.12-linuxkit (arm64)   containerd://2.3.4
+minikube-m02   Ready    <none>          99s     v1.37.0   192.168.49.3   <none>        Debian GNU/Linux 12 (bookworm)   7.0.12-linuxkit (arm64)   containerd://2.3.4
+
+$ kubectl get pods -n kube-system -l k8s-app=kube-dns -o wide
+NAME                       READY   STATUS    RESTARTS      AGE    IP           NODE       NOMINATED NODE   READINESS GATES
+coredns-559f6c778d-gndv7   0/1     Running   1 (36s ago)   2m6s   10.244.0.2   minikube   <none>           <none>
+
