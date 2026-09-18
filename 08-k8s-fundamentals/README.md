@@ -6,6 +6,8 @@ Install Minikube and `kubectl`, drive a local cluster through its full lifecycle
 the control plane / worker node architecture against what the cluster actually reports.
 **All output blocks are extracted verbatim** from the transcripts in [`outputs/`](outputs).
 
+The screenshots are **renders of those transcripts**, not captures of a live terminal — every lab ran non-interactively, so there was no window to photograph. Each image names its source transcript in the title bar; see [`screenshots/`](screenshots).
+
 Everything here runs on a **two-node** cluster (`minikube start --nodes=2`), not the usual
 single node. That matters for the sessions that follow: a DaemonSet with one pod per node and
 a NodePort open on every node are only convincing when there is more than one node.
@@ -46,6 +48,10 @@ BuildVersion:		25F84
 The machine is **Apple Silicon (arm64)**. That single fact causes two real problems later —
 `mysql:5.7` publishes no arm64 image (Homework 9, Task 6) and the Docker driver's node IP is
 unreachable from macOS (Homework 10, Task 12). Both are documented where they bite.
+
+
+![minikube and kubectl version checks on the macOS host](screenshots/01-version-check.png)
+*minikube and kubectl version checks on the macOS host*
 
 ---
 
@@ -94,6 +100,10 @@ X Docker Desktop only has 3916MiB available, you may encounter application deplo
 
 `--memory` and `--cpus` are per node. `1800` and `2` were chosen to fit; the defaults
 (2200 MiB, 2 CPUs) would have overcommitted this Docker VM.
+
+
+![the two-node cluster starting, including the Docker memory warning](screenshots/02-minikube-start.png)
+*the two-node cluster starting, including the Docker memory warning*
 
 ---
 
@@ -237,6 +247,13 @@ $ minikube ip
 192.168.49.2
 ```
 
+
+![minikube status and kubectl get nodes -o wide](screenshots/03-minikube-status.png)
+*minikube status and kubectl get nodes -o wide*
+
+![kube-system pods once minikube-m02 has settled: control-plane components on one node, kube-proxy and kindnet on both](screenshots/03b-kube-system-pods.png)
+*kube-system pods once minikube-m02 has settled: control-plane components on one node, kube-proxy and kindnet on both*
+
 ---
 
 # Task 4 — Stopping the cluster cleanly
@@ -320,6 +337,10 @@ minikube-m02   Ready    <none>          91s    v1.37.0   192.168.49.3   <none>  
 | `minikube stop` | everything — containers, disks, etcd state, images |
 | `minikube delete` | nothing in the profile; the node containers and their volumes are removed |
 | `minikube delete --all --purge` | also the `~/.minikube` cache, including the 470 MiB base image |
+
+
+![minikube stop, the exit-7 status, and the restart](screenshots/04-minikube-stop.png)
+*minikube stop, the exit-7 status, and the restart*
 
 ---
 
