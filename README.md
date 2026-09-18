@@ -10,6 +10,11 @@ Course repository: <https://github.com/Nency-Ravaliya/devops-heros>
 > transcript, and every transcript is committed alongside the write-up so you can check it.
 > Where something failed, broke, or behaved differently than expected, that is written down
 > too, along with the fix.
+>
+> The Kubernetes screenshots (Homeworks 8-11) are **renders of those transcripts** rather than
+> captures of a live terminal — those labs ran non-interactively, so there was no window to
+> photograph. Each image names its source transcript in the title bar. The Docker screenshots
+> (Homeworks 5-7) are real browser captures.
 
 ---
 
