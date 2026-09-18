@@ -1,0 +1,20 @@
+
+########## TASK 1 — minikube & kubectl installation verification ##########
+
+$ minikube version
+minikube version: v1.39.0
+commit: 7a9f6a841470a207de8cf4bafcccee0969d8ba10
+
+$ kubectl version --client
+Client Version: v1.36.1
+Kustomize Version: v5.8.1
+
+$ docker version --format 'Docker Engine {{.Server.Version}} on {{.Server.Os}}/{{.Server.Arch}}'
+Docker Engine 29.7.2 on linux/arm64
+
+$ uname -m && sw_vers
+arm64
+ProductName:		macOS
+ProductVersion:		26.5.2
+BuildVersion:		25F84
+

@@ -1,0 +1,37 @@
+
+########## TASK 2 — minikube start (2-node cluster, docker driver) ##########
+
+$ minikube start --nodes=2 --driver=docker --memory=1800 --cpus=2
+* minikube v1.39.0 on Darwin 26.5.2 (arm64)
+* Using the docker driver based on user configuration
+
+X Docker Desktop only has 3916MiB available, you may encounter application deployment failures.
+* Suggestion:
+
+    1. Click on "Docker for Desktop" menu icon
+    2. Click "Preferences"
+    3. Click "Resources"
+    4. Increase "Memory" slider bar to 2.25 GB or higher
+    5. Click "Apply & Restart"
+* Documentation: https://docs.docker.com/docker-for-mac/#resources
+
+* Using Docker Desktop driver with root privileges
+* Starting "minikube" primary control-plane node in "minikube" cluster
+* Pulling base image v0.0.51 ...
+* Downloading Kubernetes v1.37.0 preload ...
+    > gcr.io/k8s-minikube/kicbase:  470.53 MiB / 470.53 MiB  100.00% 359.87 KiB p/s
+* Preparing Kubernetes v1.37.0 on containerd 2.3.4 ...
+
+* Configuring CNI (Container Networking Interface) ...
+* Verifying Kubernetes components...
+  - Using image gcr.io/k8s-minikube/storage-provisioner:v5
+* Enabled addons: default-storageclass, storage-provisioner
+
+* Starting "minikube-m02" worker node in "minikube" cluster
+* Pulling base image v0.0.51 ...
+* Found network options:
+  - NO_PROXY=192.168.49.2
+* Preparing Kubernetes v1.37.0 on containerd 2.3.4 ...
+  - env NO_PROXY=192.168.49.2
+* Verifying Kubernetes components...
+* Done! kubectl is now configured to use "minikube" cluster and "default" namespace by default

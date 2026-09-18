@@ -1,0 +1,98 @@
+
+########## TASK 4 — stop the cluster cleanly ##########
+
+$ minikube stop
+* Stopping node "minikube-m02"  ...
+* Powering off "minikube-m02" via SSH ...
+* Stopping node "minikube"  ...
+* Powering off "minikube" via SSH ...
+* 2 nodes stopped.
+
+$ minikube status; echo "exit code: $?"
+minikube
+type: Control Plane
+host: Stopped
+kubelet: Stopped
+apiserver: Stopped
+kubeconfig: Stopped
+
+minikube-m02
+type: Worker
+host: Stopped
+kubelet: Stopped
+
+exit code: 7
+
+$ kubectl get nodes 2>&1; echo "exit code: $?"
+E0918 04:57:45.559003   87353 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: the server could not find the requested resource"
+E0918 04:57:45.564078   87353 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: the server could not find the requested resource"
+E0918 04:57:45.580320   87353 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: the server could not find the requested resource"
+E0918 04:57:45.583951   87353 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: the server could not find the requested resource"
+E0918 04:57:45.588383   87353 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: the server could not find the requested resource"
+Error from server (NotFound): the server could not find the requested resource
+exit code: 1
+
+$ docker ps -a --filter name=minikube --format 'table {{.Names}}\t{{.Status}}'
+NAMES          STATUS
+minikube-m02   Exited (130) 2 seconds ago
+minikube       Exited (130) 1 second ago
+
+# stop is not delete: the containers and their disks survive
+$ minikube profile list
+┌──────────┬────────┬────────────┬──────────────┬─────────┬─────────┬───────┬────────────────┬────────────────────┐
+│ PROFILE  │ DRIVER │  RUNTIME   │      IP      │ VERSION │ STATUS  │ NODES │ ACTIVE PROFILE │ ACTIVE KUBECONTEXT │
+├──────────┼────────┼────────────┼──────────────┼─────────┼─────────┼───────┼────────────────┼────────────────────┤
+│ minikube │ docker │ containerd │ 192.168.49.2 │ v1.37.0 │ Stopped │ 2     │ *              │                    │
+└──────────┴────────┴────────────┴──────────────┴─────────┴─────────┴───────┴────────────────┴────────────────────┘
+
+
+########## TASK 4b — start it again and confirm the workloads/state came back ##########
+
+$ minikube start
+* minikube v1.39.0 on Darwin 26.5.2 (arm64)
+* Using the docker driver based on existing profile
+
+X Docker Desktop only has 3916MiB available, you may encounter application deployment failures.
+* Suggestion: 
+
+    1. Click on "Docker for Desktop" menu icon
+    2. Click "Preferences"
+    3. Click "Resources"
+    4. Increase "Memory" slider bar to 2.25 GB or higher
+    5. Click "Apply & Restart"
+* Documentation: https://docs.docker.com/docker-for-mac/#resources
+
+* Starting "minikube" primary control-plane node in "minikube" cluster
+* Pulling base image v0.0.51 ...
+* Preparing Kubernetes v1.37.0 on containerd 2.3.4 ...
+* Verifying Kubernetes components...
+* Enabled addons: 
+
+* Starting "minikube-m02" worker node in "minikube" cluster
+* Pulling base image v0.0.51 ...
+* Found network options:
+  - NO_PROXY=192.168.49.2
+* Preparing Kubernetes v1.37.0 on containerd 2.3.4 ...
+  - env NO_PROXY=192.168.49.2
+* Verifying Kubernetes components...
+* Done! kubectl is now configured to use "minikube" cluster and "default" namespace by default
+
+$ minikube status
+minikube
+type: Control Plane
+host: Running
+kubelet: Running
+apiserver: Running
+kubeconfig: Configured
+
+minikube-m02
+type: Worker
+host: Running
+kubelet: Running
+
+
+$ kubectl get nodes -o wide
+NAME           STATUS   ROLES           AGE    VERSION   INTERNAL-IP    EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION            CONTAINER-RUNTIME
+minikube       Ready    control-plane   2m6s   v1.37.0   192.168.49.2   <none>        Debian GNU/Linux 12 (bookworm)   7.0.12-linuxkit (arm64)   containerd://2.3.4
+minikube-m02   Ready    <none>          91s    v1.37.0   192.168.49.3   <none>        Debian GNU/Linux 12 (bookworm)   7.0.12-linuxkit (arm64)   containerd://2.3.4
+

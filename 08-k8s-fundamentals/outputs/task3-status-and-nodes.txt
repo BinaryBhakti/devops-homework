@@ -1,0 +1,121 @@
+
+########## TASK 3 — cluster status & node health ##########
+
+$ minikube status
+minikube
+type: Control Plane
+host: Running
+kubelet: Running
+apiserver: Running
+kubeconfig: Configured
+
+minikube-m02
+type: Worker
+host: Running
+kubelet: Running
+
+
+$ kubectl get nodes -o wide
+NAME           STATUS     ROLES           AGE   VERSION   INTERNAL-IP    EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION            CONTAINER-RUNTIME
+minikube       Ready      control-plane   40s   v1.37.0   192.168.49.2   <none>        Debian GNU/Linux 12 (bookworm)   7.0.12-linuxkit (arm64)   containerd://2.3.4
+minikube-m02   NotReady   <none>          5s    v1.37.0   192.168.49.3   <none>        Debian GNU/Linux 12 (bookworm)   7.0.12-linuxkit (arm64)   containerd://2.3.4
+
+$ kubectl cluster-info
+Kubernetes control plane is running at https://127.0.0.1:59729
+CoreDNS is running at https://127.0.0.1:59729/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+
+To further debug and diagnose cluster problems, use 'kubectl cluster-info dump'.
+
+$ kubectl get pods -n kube-system -o wide
+NAME                               READY   STATUS              RESTARTS   AGE   IP             NODE           NOMINATED NODE   READINESS GATES
+coredns-559f6c778d-gndv7           0/1     Running             0          32s   10.244.0.2     minikube       <none>           <none>
+etcd-minikube                      1/1     Running             0          39s   192.168.49.2   minikube       <none>           <none>
+kindnet-g7hkk                      1/1     Running             0          32s   192.168.49.2   minikube       <none>           <none>
+kindnet-kg9vg                      0/1     ContainerCreating   0          4s    192.168.49.3   minikube-m02   <none>           <none>
+kube-apiserver-minikube            1/1     Running             0          39s   192.168.49.2   minikube       <none>           <none>
+kube-controller-manager-minikube   1/1     Running             0          39s   192.168.49.2   minikube       <none>           <none>
+kube-proxy-dr6pr                   1/1     Running             0          4s    192.168.49.3   minikube-m02   <none>           <none>
+kube-proxy-sxfh8                   1/1     Running             0          32s   192.168.49.2   minikube       <none>           <none>
+kube-scheduler-minikube            1/1     Running             0          39s   192.168.49.2   minikube       <none>           <none>
+storage-provisioner                1/1     Running             0          35s   192.168.49.2   minikube       <none>           <none>
+
+$ kubectl get pods -n kube-system -o custom-columns='NAME:.metadata.name,NODE:.spec.nodeName' --sort-by=.spec.nodeName
+NAME                               NODE
+coredns-559f6c778d-gndv7           minikube
+etcd-minikube                      minikube
+kindnet-g7hkk                      minikube
+kube-apiserver-minikube            minikube
+kube-controller-manager-minikube   minikube
+kube-proxy-sxfh8                   minikube
+kube-scheduler-minikube            minikube
+storage-provisioner                minikube
+kindnet-kg9vg                      minikube-m02
+kube-proxy-dr6pr                   minikube-m02
+
+$ docker ps --filter name=minikube --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+NAMES          IMAGE                                 STATUS          PORTS
+minikube-m02   gcr.io/k8s-minikube/kicbase:v0.0.51   Up 10 seconds   127.0.0.1:59764->22/tcp, 127.0.0.1:59760->2376/tcp, 127.0.0.1:59761->5000/tcp, 127.0.0.1:59762->8443/tcp, 127.0.0.1:59763->32443/tcp
+minikube       gcr.io/k8s-minikube/kicbase:v0.0.51   Up 50 seconds   127.0.0.1:59730->22/tcp, 127.0.0.1:59726->2376/tcp, 127.0.0.1:59728->5000/tcp, 127.0.0.1:59729->8443/tcp, 127.0.0.1:59727->32443/tcp
+
+$ minikube ip
+192.168.49.2
+
+$ kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.nodeInfo.containerRuntimeVersion}{"\t"}{.status.nodeInfo.kubeletVersion}{"\t"}{.status.nodeInfo.osImage}{"\n"}{end}'
+minikube	containerd://2.3.4	v1.37.0	Debian GNU/Linux 12 (bookworm)
+minikube-m02	containerd://2.3.4	v1.37.0	Debian GNU/Linux 12 (bookworm)
+
+
+########## TASK 3 (continued) — the same checks ~3 minutes later, once minikube-m02 has settled ##########
+
+$ kubectl get nodes -o wide
+NAME           STATUS   ROLES           AGE   VERSION   INTERNAL-IP    EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION            CONTAINER-RUNTIME
+minikube       Ready    control-plane   74s   v1.37.0   192.168.49.2   <none>        Debian GNU/Linux 12 (bookworm)   7.0.12-linuxkit (arm64)   containerd://2.3.4
+minikube-m02   Ready    <none>          39s   v1.37.0   192.168.49.3   <none>        Debian GNU/Linux 12 (bookworm)   7.0.12-linuxkit (arm64)   containerd://2.3.4
+
+$ kubectl get pods -n kube-system -o wide
+NAME                               READY   STATUS    RESTARTS   AGE   IP             NODE           NOMINATED NODE   READINESS GATES
+coredns-559f6c778d-gndv7           1/1     Running   0          66s   10.244.0.2     minikube       <none>           <none>
+etcd-minikube                      1/1     Running   0          73s   192.168.49.2   minikube       <none>           <none>
+kindnet-g7hkk                      1/1     Running   0          66s   192.168.49.2   minikube       <none>           <none>
+kindnet-kg9vg                      1/1     Running   0          38s   192.168.49.3   minikube-m02   <none>           <none>
+kube-apiserver-minikube            1/1     Running   0          73s   192.168.49.2   minikube       <none>           <none>
+kube-controller-manager-minikube   1/1     Running   0          73s   192.168.49.2   minikube       <none>           <none>
+kube-proxy-dr6pr                   1/1     Running   0          38s   192.168.49.3   minikube-m02   <none>           <none>
+kube-proxy-sxfh8                   1/1     Running   0          66s   192.168.49.2   minikube       <none>           <none>
+kube-scheduler-minikube            1/1     Running   0          73s   192.168.49.2   minikube       <none>           <none>
+storage-provisioner                1/1     Running   0          69s   192.168.49.2   minikube       <none>           <none>
+
+$ kubectl get --raw='/readyz?verbose' | head -25
+[+]ping ok
+[+]log ok
+[+]etcd ok
+[+]etcd-readiness ok
+[+]informer-sync ok
+[+]poststarthook/start-apiserver-admission-initializer ok
+[+]poststarthook/generic-apiserver-start-informers ok
+[+]poststarthook/priority-and-fairness-config-consumer ok
+[+]poststarthook/priority-and-fairness-filter ok
+[+]poststarthook/storage-object-count-tracker-hook ok
+[+]poststarthook/start-apiextensions-informers ok
+[+]poststarthook/start-apiextensions-controllers ok
+[+]poststarthook/crd-informer-synced ok
+[+]poststarthook/start-system-namespaces-controller ok
+[+]poststarthook/peer-endpoint-reconciler-controller ok
+[+]poststarthook/start-cluster-authentication-info-controller ok
+[+]poststarthook/start-kube-apiserver-identity-lease-controller ok
+[+]poststarthook/start-kube-apiserver-identity-lease-garbage-collector ok
+[+]poststarthook/storage-readiness ok
+[+]poststarthook/start-legacy-token-tracking-controller ok
+[+]poststarthook/start-service-ip-repair-controllers ok
+[+]poststarthook/rbac/bootstrap-roles ok
+[+]poststarthook/scheduling/bootstrap-system-priority-classes ok
+[+]poststarthook/priority-and-fairness-config-producer ok
+[+]poststarthook/bootstrap-controller ok
+
+$ kubectl get componentstatuses 2>&1 | head -6
+Warning: v1 ComponentStatus is deprecated in v1.19+
+NAME                 STATUS    MESSAGE   ERROR
+controller-manager   Healthy   ok        
+scheduler            Healthy   ok        
+etcd-0               Healthy   ok        
+
