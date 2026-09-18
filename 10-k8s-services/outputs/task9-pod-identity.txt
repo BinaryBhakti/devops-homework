@@ -1,0 +1,53 @@
+
+########## TASK 9 — pod identity: Deployment vs StatefulSet ##########
+
+$ kubectl get pods -l app=web-clusterip
+NAME                                 READY   STATUS    RESTARTS   AGE
+web-app-clusterip-66865d4855-ghktb   1/1     Running   0          2m25s
+web-app-clusterip-66865d4855-wnsrl   1/1     Running   0          2m25s
+web-app-clusterip-66865d4855-wxzst   1/1     Running   0          2m25s
+
+$ kubectl get pods -l app=web-headless
+NAME             READY   STATUS    RESTARTS   AGE
+web-stateful-0   1/1     Running   0          81s
+web-stateful-1   1/1     Running   0          80s
+web-stateful-2   1/1     Running   0          78s
+
+$ kubectl get pod web-app-clusterip-66865d4855-ghktb -o jsonpath='name={.metadata.name} ip={.status.podIP} node={.spec.nodeName}{"\n"}'
+name=web-app-clusterip-66865d4855-ghktb ip=10.244.0.23 node=minikube
+
+$ kubectl get pod web-stateful-0 -o jsonpath='name={.metadata.name} ip={.status.podIP} node={.spec.nodeName}{"\n"}'
+name=web-stateful-0 ip=10.244.1.66 node=minikube-m02
+
+# kill one pod from each controller
+$ kubectl delete pod web-app-clusterip-66865d4855-ghktb
+pod "web-app-clusterip-66865d4855-ghktb" deleted from default namespace
+
+$ kubectl delete pod web-stateful-0
+pod "web-stateful-0" deleted from default namespace
+
+$ kubectl get pods -l app=web-clusterip
+NAME                                 READY   STATUS    RESTARTS   AGE
+web-app-clusterip-66865d4855-pl8wp   1/1     Running   0          30s
+web-app-clusterip-66865d4855-wnsrl   1/1     Running   0          2m55s
+web-app-clusterip-66865d4855-wxzst   1/1     Running   0          2m55s
+
+$ kubectl get pods -l app=web-headless
+NAME             READY   STATUS    RESTARTS   AGE
+web-stateful-0   1/1     Running   0          26s
+web-stateful-1   1/1     Running   0          110s
+web-stateful-2   1/1     Running   0          108s
+
+$ kubectl get pod web-stateful-0 -o jsonpath='name={.metadata.name} ip={.status.podIP} node={.spec.nodeName}{"\n"}'
+name=web-stateful-0 ip=10.244.1.69 node=minikube-m02
+
+# the Deployment pod came back under a brand-new name; web-stateful-0 came back as web-stateful-0
+$ kubectl exec headless-dns-client -- nslookup web-stateful-0.web-service-headless.default.svc.cluster.local
+Server:		10.96.0.10
+Address:	10.96.0.10:53
+
+
+Name:	web-stateful-0.web-service-headless.default.svc.cluster.local
+Address: 10.244.1.69
+
+

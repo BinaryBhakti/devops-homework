@@ -1,0 +1,94 @@
+
+########## TASK 3 — NodePort ##########
+
+$ cat 02-nodeport/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-service-nodeport
+  labels:
+    app: web-nodeport
+spec:
+  type: NodePort
+  selector:
+    app: web-nodeport
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      nodePort: 30080
+      protocol: TCP
+
+$ kubectl apply -f 02-nodeport/app-deployment.yaml
+deployment.apps/web-app-nodeport created
+
+$ kubectl apply -f 02-nodeport/service.yaml
+service/web-service-nodeport created
+
+$ kubectl rollout status deployment/web-app-nodeport --timeout=240s
+Waiting for deployment "web-app-nodeport" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "web-app-nodeport" rollout to finish: 1 of 2 updated replicas are available...
+deployment "web-app-nodeport" successfully rolled out
+
+$ kubectl get svc web-service-nodeport
+NAME                   TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+web-service-nodeport   NodePort   10.98.175.186   <none>        80:30080/TCP   1s
+
+$ kubectl get pods -l app=web-nodeport -o wide
+NAME                              READY   STATUS    RESTARTS   AGE   IP            NODE           NOMINATED NODE   READINESS GATES
+web-app-nodeport-6c8f48bd-hvxt2   1/1     Running   0          2s    10.244.0.24   minikube       <none>           <none>
+web-app-nodeport-6c8f48bd-ktvp4   1/1     Running   0          2s    10.244.1.62   minikube-m02   <none>           <none>
+
+$ kubectl get endpoints web-service-nodeport
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+NAME                   ENDPOINTS                       AGE
+web-service-nodeport   10.244.0.24:80,10.244.1.62:80   2s
+
+# the port is open on EVERY node, including the one running no pod of this app
+$ kubectl exec curl-client -- curl -s -o /dev/null -w "%{http_code}\n" http://192.168.49.2:30080   # node minikube
+000
+command terminated with exit code 7
+$ kubectl exec curl-client -- curl -s -o /dev/null -w "%{http_code}\n" http://192.168.49.3:30080   # node minikube-m02
+200
+
+$ minikube ip
+192.168.49.2
+
+# and from the macOS host, the documented Docker-driver failure (Task 12 covers why)
+$ curl --connect-timeout 5 -s -o /dev/null -w '%{http_code}\n' http://$(minikube ip):30080 || echo 'connection failed, as expected on the docker driver'
+000
+connection failed, as expected on the docker driver
+
+
+########## TASK 3 addendum — the nodePort really is open on both nodes ##########
+
+# the previous check ran from a POD on minikube-m02 and failed against the OTHER node's IP.
+# repeat it from each node's own host namespace, where there is no CNI in the path:
+$ kubectl get pod curl-client -o jsonpath='client pod runs on node: {.spec.nodeName}{"\n"}'
+client pod runs on node: minikube-m02
+
+$ docker exec minikube curl -s -o /dev/null -w 'node minikube     -> 192.168.49.2:30080 = %{http_code}\n' --max-time 5 http://192.168.49.2:30080
+node minikube     -> 192.168.49.2:30080 = 200
+
+$ docker exec minikube-m02 curl -s -o /dev/null -w 'node minikube-m02 -> 192.168.49.2:30080 = %{http_code}\n' --max-time 5 http://192.168.49.2:30080
+node minikube-m02 -> 192.168.49.2:30080 = 200
+
+$ docker exec minikube curl -s -o /dev/null -w 'node minikube     -> 192.168.49.3:30080 = %{http_code}\n' --max-time 5 http://192.168.49.3:30080
+node minikube     -> 192.168.49.3:30080 = 200
+
+$ docker exec minikube-m02 curl -s -o /dev/null -w 'node minikube-m02 -> 192.168.49.3:30080 = %{http_code}\n' --max-time 5 http://192.168.49.3:30080
+node minikube-m02 -> 192.168.49.3:30080 = 200
+
+# where the two backing pods actually are:
+$ kubectl get pods -l app=web-nodeport -o wide
+NAME                              READY   STATUS    RESTARTS   AGE   IP            NODE           NOMINATED NODE   READINESS GATES
+web-app-nodeport-6c8f48bd-hvxt2   1/1     Running   0          42s   10.244.0.24   minikube       <none>           <none>
+web-app-nodeport-6c8f48bd-ktvp4   1/1     Running   0          42s   10.244.1.62   minikube-m02   <none>           <none>
+
+# and the kube-proxy NodePort rule on each node
+$ docker exec minikube sh -c 'iptables-save 2>/dev/null | grep -c 30080' || true
+2
+
+$ docker exec minikube-m02 sh -c 'iptables-save 2>/dev/null | grep -c 30080' || true
+2
+

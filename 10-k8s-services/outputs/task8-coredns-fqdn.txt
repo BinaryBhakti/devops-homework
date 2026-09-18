@@ -1,0 +1,136 @@
+
+########## TASK 8 — CoreDNS, FQDN anatomy and ndots:5 ##########
+
+$ kubectl get pods -n kube-system -l k8s-app=kube-dns -o wide
+NAME                       READY   STATUS    RESTARTS      AGE   IP           NODE       NOMINATED NODE   READINESS GATES
+coredns-559f6c778d-gndv7   1/1     Running   1 (49m ago)   50m   10.244.0.2   minikube   <none>           <none>
+
+$ kubectl get svc -n kube-system kube-dns
+NAME       TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)                  AGE
+kube-dns   ClusterIP   10.96.0.10   <none>        53/UDP,53/TCP,9153/TCP   50m
+
+$ kubectl get configmap -n kube-system coredns -o jsonpath='{.data.Corefile}'
+.:53 {
+    log
+    errors
+    health {
+       lameduck 5s
+    }
+    ready
+    kubernetes cluster.local in-addr.arpa ip6.arpa {
+       pods insecure
+       fallthrough in-addr.arpa ip6.arpa
+       ttl 30
+    }
+    prometheus :9153
+    hosts {
+       192.168.65.254 host.minikube.internal
+       fallthrough
+    }
+    forward . /etc/resolv.conf {
+       max_concurrent 1000
+    }
+    cache 30 {
+       disable success cluster.local
+       disable denial cluster.local
+    }
+    loop
+    reload
+    loadbalance
+}
+
+$ kubectl exec curl-client -- cat /etc/resolv.conf
+search default.svc.cluster.local svc.cluster.local cluster.local
+nameserver 10.96.0.10
+options ndots:5
+
+# short name, namespaced name and full FQDN all land on the same VIP
+$ kubectl exec curl-client -- nslookup web-service-clusterip
+Server:		10.96.0.10
+Address:	10.96.0.10:53
+
+** server can't find web-service-clusterip.cluster.local: NXDOMAIN
+
+** server can't find web-service-clusterip.svc.cluster.local: NXDOMAIN
+
+** server can't find web-service-clusterip.svc.cluster.local: NXDOMAIN
+
+** server can't find web-service-clusterip.cluster.local: NXDOMAIN
+
+Name:	web-service-clusterip.default.svc.cluster.local
+Address: 10.100.66.42
+
+
+command terminated with exit code 1
+
+$ kubectl exec curl-client -- nslookup web-service-clusterip.default
+Server:		10.96.0.10
+Address:	10.96.0.10:53
+
+Non-authoritative answer:
+
+** server can't find web-service-clusterip.default: NXDOMAIN
+
+command terminated with exit code 1
+
+$ kubectl exec curl-client -- nslookup web-service-clusterip.default.svc.cluster.local
+Server:		10.96.0.10
+Address:	10.96.0.10:53
+
+Name:	web-service-clusterip.default.svc.cluster.local
+Address: 10.100.66.42
+
+
+
+# ndots:5 — an external name with fewer than 5 dots is tried against every search suffix first
+$ kubectl exec curl-client -- nslookup api.github.com
+Server:		10.96.0.10
+Address:	10.96.0.10:53
+
+Non-authoritative answer:
+
+Non-authoritative answer:
+Name:	api.github.com
+Address: 20.207.73.85
+
+
+$ kubectl exec curl-client -- nslookup api.github.com.
+Server:		10.96.0.10
+Address:	10.96.0.10:53
+
+Name:	api.github.com
+Address: 20.207.73.85
+
+
+
+# count the wasted round trips: time a relative lookup vs the same name rooted with a trailing dot
+$ kubectl exec curl-client -- sh -c 'time nslookup api.github.com > /dev/null' 2>&1
+real	0m 0.00s
+user	0m 0.00s
+sys	0m 0.00s
+
+$ kubectl exec curl-client -- sh -c 'time nslookup api.github.com. > /dev/null' 2>&1
+real	0m 0.00s
+user	0m 0.00s
+sys	0m 0.00s
+
+
+########## TASK 8 addendum — measuring the ndots:5 penalty properly ##########
+
+# busybox's built-in 'time' only has 10ms resolution and reported 0.00s for both. Measure from
+# the host instead, over 30 lookups, so the difference is well above the noise floor.
+# 'api.github.com' has 2 dots, which is < ndots:5, so the resolver tries all 3 search suffixes FIRST.
+$ time kubectl exec curl-client -- sh -c "for i in \$(seq 1 30); do nslookup api.github.com >/dev/null 2>&1; done"   # relative, 2 dots
+kubectl exec curl-client -- sh -c   0.06s user 0.08s system 23% cpu 0.603 total
+
+$ time kubectl exec curl-client -- sh -c "for i in \$(seq 1 30); do nslookup api.github.com. >/dev/null 2>&1; done"  # rooted, skips the search path
+kubectl exec curl-client -- sh -c   0.06s user 0.02s system 37% cpu 0.205 total
+
+# the wasted queries are visible directly in the nslookup output: every NXDOMAIN line below is
+# one extra round trip to CoreDNS before the real answer is found.
+$ kubectl exec curl-client -- nslookup api.github.com 2>&1 | grep -c 'NXDOMAIN'; true
+0
+
+$ kubectl exec curl-client -- nslookup api.github.com. 2>&1 | grep -c 'NXDOMAIN'; true
+0
+

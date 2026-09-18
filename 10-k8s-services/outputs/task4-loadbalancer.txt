@@ -1,0 +1,109 @@
+
+########## TASK 4 — LoadBalancer ##########
+
+$ cat 03-loadbalancer/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-service-loadbalancer
+  labels:
+    app: web-loadbalancer
+spec:
+  type: LoadBalancer
+  selector:
+    app: web-loadbalancer
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP
+
+$ kubectl apply -f 03-loadbalancer/app-deployment.yaml
+deployment.apps/web-app-loadbalancer created
+
+$ kubectl apply -f 03-loadbalancer/service.yaml
+service/web-service-loadbalancer created
+
+$ kubectl rollout status deployment/web-app-loadbalancer --timeout=240s
+Waiting for deployment "web-app-loadbalancer" rollout to finish: 0 of 3 updated replicas are available...
+Waiting for deployment "web-app-loadbalancer" rollout to finish: 1 of 3 updated replicas are available...
+Waiting for deployment "web-app-loadbalancer" rollout to finish: 2 of 3 updated replicas are available...
+deployment "web-app-loadbalancer" successfully rolled out
+
+# with no cloud controller manager, EXTERNAL-IP sits at <pending> forever
+$ kubectl get svc web-service-loadbalancer
+NAME                       TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE
+web-service-loadbalancer   LoadBalancer   10.108.100.161   <pending>     80:31710/TCP   2s
+
+$ kubectl get svc web-service-loadbalancer -o jsonpath='type={.spec.type} clusterIP={.spec.clusterIP} nodePort={.spec.ports[0].nodePort} externalIPs={.status.loadBalancer.ingress}{"\n"}'
+type=LoadBalancer clusterIP=10.108.100.161 nodePort=31710 externalIPs=
+
+# a LoadBalancer is a NodePort is a ClusterIP — it is a superset, all three layers exist
+$ kubectl describe svc web-service-loadbalancer | grep -E 'Type|IP:|Port|NodePort|Endpoints'
+Type:                     LoadBalancer
+IP:                       10.108.100.161
+Port:                     http  80/TCP
+TargetPort:               80/TCP
+NodePort:                 http  31710/TCP
+Endpoints:                10.244.1.64:80,10.244.1.63:80,10.244.0.25:80
+
+$ kubectl get endpoints web-service-loadbalancer
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+NAME                       ENDPOINTS                                      AGE
+web-service-loadbalancer   10.244.0.25:80,10.244.1.63:80,10.244.1.64:80   2s
+
+# reachability without sudo: minikube's own forwarder
+$ timeout 25 minikube service web-service-loadbalancer --url | tee /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/lb-url.txt
+bash: timeout: command not found
+
+# in-cluster access always works regardless of the EXTERNAL-IP situation
+$ kubectl exec curl-client -- curl -s http://web-service-loadbalancer | grep -i '<title>'
+<title>Welcome to nginx!</title>
+
+$ kubectl delete -f 03-loadbalancer/service.yaml -f 03-loadbalancer/app-deployment.yaml
+service "web-service-loadbalancer" deleted from default namespace
+deployment.apps "web-app-loadbalancer" deleted from default namespace
+
+
+########## TASK 4 addendum — reaching the LoadBalancer from macOS without sudo ##########
+
+# ('timeout' is a GNU coreutils command and is not present on macOS — redone properly here.)
+$ kubectl apply -f 03-loadbalancer/app-deployment.yaml -f 03-loadbalancer/service.yaml
+deployment.apps/web-app-loadbalancer created
+service/web-service-loadbalancer created
+
+$ kubectl rollout status deployment/web-app-loadbalancer --timeout=300s
+Waiting for deployment "web-app-loadbalancer" rollout to finish: 0 out of 3 new replicas have been updated...
+Waiting for deployment "web-app-loadbalancer" rollout to finish: 0 of 3 updated replicas are available...
+Waiting for deployment "web-app-loadbalancer" rollout to finish: 1 of 3 updated replicas are available...
+Waiting for deployment "web-app-loadbalancer" rollout to finish: 2 of 3 updated replicas are available...
+deployment "web-app-loadbalancer" successfully rolled out
+
+$ kubectl get svc web-service-loadbalancer
+NAME                       TYPE           CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+web-service-loadbalancer   LoadBalancer   10.99.161.237   <pending>     80:30678/TCP   1s
+
+# minikube tunnel is the documented way to populate EXTERNAL-IP, but it needs sudo to write
+# host routes and bind privileged ports, and this session has no passwordless sudo:
+$ sudo -n true 2>&1; echo "exit code: $?"
+sudo: a password is required
+exit code: 1
+
+# minikube service --url opens a loopback forwarder instead, no sudo required
+$ cat /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/lb-url.txt
+http://127.0.0.1:61254
+! Because you are using a Docker driver on darwin, the terminal needs to be open to run it.
+
+$ curl -I -s --max-time 10 http://127.0.0.1:61254 | head -4
+HTTP/1.1 200 OK
+Server: nginx/1.25.5
+Date: Fri, 18 Sep 2026 00:20:31 GMT
+Content-Type: text/html
+
+$ curl -s --max-time 10 http://127.0.0.1:61254 | grep -i '<title>'
+<title>Welcome to nginx!</title>
+
+$ kubectl delete -f 03-loadbalancer/service.yaml -f 03-loadbalancer/app-deployment.yaml
+service "web-service-loadbalancer" deleted from default namespace
+deployment.apps "web-app-loadbalancer" deleted from default namespace
+

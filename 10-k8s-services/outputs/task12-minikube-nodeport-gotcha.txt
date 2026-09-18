@@ -1,0 +1,85 @@
+
+########## TASK 12 — why <node-ip>:<nodePort> fails on macOS with the docker driver ##########
+
+$ kubectl get svc web-service-nodeport
+NAME                   TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+web-service-nodeport   NodePort   10.98.175.186   <none>        80:30080/TCP   3m13s
+
+$ minikube ip
+192.168.49.2
+
+$ kubectl get nodes -o wide
+NAME           STATUS   ROLES           AGE   VERSION   INTERNAL-IP    EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION            CONTAINER-RUNTIME
+minikube       Ready    control-plane   53m   v1.37.0   192.168.49.2   <none>        Debian GNU/Linux 12 (bookworm)   7.0.12-linuxkit (arm64)   containerd://2.3.4
+minikube-m02   Ready    <none>          52m   v1.37.0   192.168.49.3   <none>        Debian GNU/Linux 12 (bookworm)   7.0.12-linuxkit (arm64)   containerd://2.3.4
+
+# the node IP lives on a docker bridge inside the Linux VM; the macOS host has no route to it
+$ docker network inspect minikube --format '{{.Name}} driver={{.Driver}} subnet={{range .IPAM.Config}}{{.Subnet}}{{end}} gateway={{range .IPAM.Config}}{{.Gateway}}{{end}}'
+minikube driver=bridge subnet=192.168.49.0/24 gateway=192.168.49.1
+
+$ route -n get $(minikube ip) 2>&1 | head -8; true
+   route to: 192.168.49.2
+destination: default
+       mask: default
+    gateway: 10.114.0.1
+  interface: en0
+      flags: <UP,GATEWAY,DONE,STATIC,PRCLONING,GLOBAL>
+ recvpipe  sendpipe  ssthresh  rtt,msec    rttvar  hopcount      mtu     expire
+       0         0         0         0         0         0      1500         0 
+
+$ ifconfig | grep -c 192.168.49; true
+0
+
+$ time curl --connect-timeout 5 -s -o /dev/null -w "%{http_code}\n" http://$(minikube ip):30080
+000
+
+real	0m5.165s
+user	0m0.075s
+sys	0m0.068s
+
+# the same request from INSIDE the cluster network works fine — nothing is wrong with the Service
+$ kubectl exec curl-client -- curl -s -o /dev/null -w '%{http_code}\n' http://$(minikube ip 2>/dev/null || echo 192.168.49.2):30080; true
+200
+
+# WORKAROUND 1 — minikube service <svc> --url opens a loopback forwarder
+$ cat /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/np-url.txt
+http://127.0.0.1:61232
+! Because you are using a Docker driver on darwin, the terminal needs to be open to run it.
+
+$ curl -I -s --max-time 10 http://127.0.0.1:61232 | head -5
+HTTP/1.1 200 OK
+Server: nginx/1.25.5
+Date: Fri, 18 Sep 2026 00:19:54 GMT
+Content-Type: text/html
+Content-Length: 615
+
+$ curl -s --max-time 10 http://127.0.0.1:61232 | grep -i '<title>'
+<title>Welcome to nginx!</title>
+
+# WORKAROUND 2 — kubectl port-forward, driver independent
+$ cat /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/pf.txt
+Forwarding from 127.0.0.1:38080 -> 80
+Forwarding from [::1]:38080 -> 80
+
+$ curl -I -s --max-time 10 http://127.0.0.1:38080 | head -5
+HTTP/1.1 200 OK
+Server: nginx/1.25.5
+Date: Fri, 18 Sep 2026 00:20:00 GMT
+Content-Type: text/html
+Content-Length: 615
+
+# WORKAROUND 3 — minikube tunnel (needs sudo; see README for why it was not run here)
+$ minikube tunnel --help 2>&1 | head -12
+tunnel creates a route to services deployed with type LoadBalancer and sets their Ingress to their ClusterIP. For a detailed example see https://minikube.sigs.k8s.io/docs/handbook/accessing
+
+Options:
+    --bind-address='':
+	set tunnel bind address, empty or '*' indicates the tunnel should be available for all interfaces
+
+    -c, --cleanup=true:
+	call with cleanup=true to remove old tunnels
+
+Usage:
+  minikube tunnel [flags] [options]
+
+

@@ -1,0 +1,11 @@
+# A Service with NO selector: Kubernetes will not manage its Endpoints,
+# which leaves the backend list for a human (or an external controller) to fill in.
+apiVersion: v1
+kind: Service
+metadata:
+  name: external-legacy-db
+spec:
+  ports:
+    - protocol: TCP
+      port: 3306
+      targetPort: 3306

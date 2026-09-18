@@ -1,0 +1,8 @@
+# Same idea as the course manifest, pointed at a domain that actually exists.
+apiVersion: v1
+kind: Service
+metadata:
+  name: external-api-service
+spec:
+  type: ExternalName
+  externalName: api.github.com

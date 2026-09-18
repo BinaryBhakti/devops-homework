@@ -1,0 +1,151 @@
+
+########## TASK 5 — ExternalName (CoreDNS CNAME alias) ##########
+
+$ cat 04-externalname/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: external-database-service
+spec:
+  type: ExternalName
+  externalName: nencyravaliya.me
+
+$ kubectl apply -f 04-externalname/service.yaml
+service/external-database-service created
+
+$ kubectl apply -f 04-externalname/client-pod.yaml
+pod/dns-test-client created
+
+$ kubectl wait --for=condition=ready pod/dns-test-client --timeout=240s
+pod/dns-test-client condition met
+
+# no ClusterIP, no selector, no Endpoints object at all
+$ kubectl get svc external-database-service
+NAME                        TYPE           CLUSTER-IP   EXTERNAL-IP        PORT(S)   AGE
+external-database-service   ExternalName   <none>       nencyravaliya.me   <none>    1s
+
+$ kubectl get endpoints external-database-service; echo "exit code: $?"
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+Error from server (NotFound): endpoints "external-database-service" not found
+exit code: 1
+
+$ kubectl describe svc external-database-service
+Name:              external-database-service
+Namespace:         default
+Labels:            <none>
+Annotations:       <none>
+Selector:          <none>
+Type:              ExternalName
+IP Families:       <none>
+IP:                
+IPs:               <none>
+External Name:     nencyravaliya.me
+Session Affinity:  None
+Events:            <none>
+
+$ kubectl exec dns-test-client -- nslookup external-database-service
+Server:		10.96.0.10
+Address:	10.96.0.10:53
+
+** server can't find external-database-service.cluster.local: NXDOMAIN
+
+** server can't find external-database-service.svc.cluster.local: NXDOMAIN
+
+** server can't find external-database-service.svc.cluster.local: NXDOMAIN
+
+** server can't find external-database-service.cluster.local: NXDOMAIN
+
+external-database-service.default.svc.cluster.local	canonical name = nencyravaliya.me
+
+external-database-service.default.svc.cluster.local	canonical name = nencyravaliya.me
+
+command terminated with exit code 1
+
+$ kubectl exec dns-test-client -- nslookup external-database-service.default.svc.cluster.local
+Server:		10.96.0.10
+Address:	10.96.0.10:53
+
+external-database-service.default.svc.cluster.local	canonical name = nencyravaliya.me
+
+external-database-service.default.svc.cluster.local	canonical name = nencyravaliya.me
+
+
+$ kubectl exec dns-test-client -- curl -s -o /dev/null -w 'http_code=%{http_code} resolved_ip=%{remote_ip}\n' -k --max-time 10 https://external-database-service
+http_code=000 resolved_ip=
+command terminated with exit code 6
+
+$ kubectl delete -f 04-externalname/service.yaml
+service "external-database-service" deleted from default namespace
+
+
+########## TASK 5 addendum — why the curl through the alias failed, and the same test with a live domain ##########
+
+# the CNAME resolved fine. The problem is the TARGET: nencyravaliya.me does not exist.
+$ kubectl exec dns-test-client -- nslookup nencyravaliya.me; echo "exit code: $?"
+Server:		10.96.0.10
+Address:	10.96.0.10:53
+
+Non-authoritative answer:
+
+** server can't find nencyravaliya.me: NXDOMAIN
+
+command terminated with exit code 1
+exit code: 1
+
+$ nslookup nencyravaliya.me 2>&1 | tail -4; echo 'same NXDOMAIN from the macOS host, so this is not a cluster DNS problem'
+Address:	10.114.0.1#53
+
+** server can't find nencyravaliya.me: NXDOMAIN
+
+same NXDOMAIN from the macOS host, so this is not a cluster DNS problem
+
+# repeat the whole task against a domain that does resolve
+$ cat /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/externalname-github.yaml
+# Same idea as the course manifest, pointed at a domain that actually exists.
+apiVersion: v1
+kind: Service
+metadata:
+  name: external-api-service
+spec:
+  type: ExternalName
+  externalName: api.github.com
+
+$ kubectl apply -f /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/externalname-github.yaml
+service/external-api-service created
+
+$ kubectl get svc external-api-service
+NAME                   TYPE           CLUSTER-IP   EXTERNAL-IP      PORT(S)   AGE
+external-api-service   ExternalName   <none>       api.github.com   <none>    0s
+
+$ kubectl exec dns-test-client -- nslookup external-api-service.default.svc.cluster.local
+Server:		10.96.0.10
+Address:	10.96.0.10:53
+
+external-api-service.default.svc.cluster.local	canonical name = api.github.com
+
+external-api-service.default.svc.cluster.local	canonical name = api.github.com
+Name:	api.github.com
+Address: 20.207.73.85
+
+
+$ kubectl exec dns-test-client -- curl -s -o /dev/null -w 'http_code=%{http_code} resolved_ip=%{remote_ip} sni_host=api.github.com\n' --max-time 15 https://external-api-service -H 'Host: api.github.com'
+http_code=000 resolved_ip=20.207.73.85 sni_host=api.github.com
+command terminated with exit code 60
+
+$ kubectl delete -f /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/externalname-github.yaml
+service "external-api-service" deleted from default namespace
+
+# exit code 60 above is a TLS failure, not a DNS or routing failure: the connection reached
+# 20.207.73.85, but curl sent SNI 'external-api-service', which is not on GitHub's certificate.
+$ kubectl exec dns-test-client -- curl -sv -o /dev/null --max-time 15 https://external-api-service 2>&1 | grep -E 'Connected to|subject:|SSL certificate problem|schannel|certificate' | head -5
+* Connected to external-api-service (20.207.73.85) port 443
+* Server certificate:
+*  subject: CN=*.github.com
+* SSL: no alternative certificate subject name matches target host name 'external-api-service'
+
+# skip verification and the request completes end to end through the alias:
+$ kubectl exec dns-test-client -- curl -sk -o /dev/null -w 'http_code=%{http_code} resolved_ip=%{remote_ip}\n' --max-time 15 https://external-api-service
+http_code=400 resolved_ip=20.207.73.85
+
+# this is the real operational catch with ExternalName: the alias changes the NAME the client
+# dials, so TLS hostname verification breaks unless the client overrides SNI/Host.

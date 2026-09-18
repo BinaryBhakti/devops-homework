@@ -1,0 +1,81 @@
+
+########## TASK 7 — Service without a selector + hand-written Endpoints ##########
+
+$ cat /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/external-legacy-db.yaml
+# A Service with NO selector: Kubernetes will not manage its Endpoints,
+# which leaves the backend list for a human (or an external controller) to fill in.
+apiVersion: v1
+kind: Service
+metadata:
+  name: external-legacy-db
+spec:
+  ports:
+    - protocol: TCP
+      port: 3306
+      targetPort: 3306
+
+$ kubectl apply -f /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/external-legacy-db.yaml
+service/external-legacy-db created
+
+$ kubectl get svc external-legacy-db
+NAME                 TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+external-legacy-db   ClusterIP   10.103.139.57   <none>        3306/TCP   0s
+
+$ kubectl get endpoints external-legacy-db
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+Error from server (NotFound): endpoints "external-legacy-db" not found
+
+$ kubectl describe svc external-legacy-db | grep -E 'Selector|Endpoints'
+Selector:                 <none>
+Endpoints:                <none>
+
+# now bind the backend by hand
+$ cat /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/external-legacy-endpoints.yaml
+# Hand-written Endpoints object, name-matched to the Service above.
+# 192.168.1.150 stands in for a legacy MySQL box outside the cluster.
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: external-legacy-db
+subsets:
+  - addresses:
+      - ip: 192.168.1.150
+    ports:
+      - port: 3306
+
+$ kubectl apply -f /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/external-legacy-endpoints.yaml
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+endpoints/external-legacy-db created
+
+$ kubectl get endpoints external-legacy-db
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+NAME                 ENDPOINTS            AGE
+external-legacy-db   192.168.1.150:3306   0s
+
+$ kubectl describe svc external-legacy-db | grep -E 'Selector|Endpoints'
+Selector:                 <none>
+Endpoints:                192.168.1.150:3306
+
+$ kubectl exec curl-client -- nslookup external-legacy-db
+Server:		10.96.0.10
+Address:	10.96.0.10:53
+
+Name:	external-legacy-db.default.svc.cluster.local
+Address: 10.103.139.57
+
+** server can't find external-legacy-db.svc.cluster.local: NXDOMAIN
+
+** server can't find external-legacy-db.cluster.local: NXDOMAIN
+
+** server can't find external-legacy-db.svc.cluster.local: NXDOMAIN
+
+** server can't find external-legacy-db.cluster.local: NXDOMAIN
+
+
+command terminated with exit code 1
+
+$ kubectl delete -f /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/external-legacy-endpoints.yaml -f /private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs-devops-homework-Mam-s-Folder/ff957139-fedd-41c1-b380-51a781f3a176/scratchpad/external-legacy-db.yaml
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+endpoints "external-legacy-db" deleted from default namespace
+service "external-legacy-db" deleted from default namespace
+

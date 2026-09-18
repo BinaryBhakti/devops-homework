@@ -1,0 +1,113 @@
+
+########## TASK 2 — ClusterIP ##########
+
+$ cat 01-clusterip/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-service-clusterip
+  labels:
+    app: web-clusterip
+spec:
+  type: ClusterIP
+  selector:
+    app: web-clusterip
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 80
+      protocol: TCP
+
+$ kubectl apply -f 01-clusterip/app-deployment.yaml
+deployment.apps/web-app-clusterip created
+
+$ kubectl apply -f 01-clusterip/service.yaml
+service/web-service-clusterip created
+
+$ kubectl rollout status deployment/web-app-clusterip --timeout=240s
+Waiting for deployment "web-app-clusterip" rollout to finish: 0 of 3 updated replicas are available...
+Waiting for deployment "web-app-clusterip" rollout to finish: 1 of 3 updated replicas are available...
+Waiting for deployment "web-app-clusterip" rollout to finish: 2 of 3 updated replicas are available...
+deployment "web-app-clusterip" successfully rolled out
+
+$ kubectl get pods -l app=web-clusterip -o wide
+NAME                                 READY   STATUS    RESTARTS   AGE   IP            NODE           NOMINATED NODE   READINESS GATES
+web-app-clusterip-66865d4855-ghktb   1/1     Running   0          2s    10.244.0.23   minikube       <none>           <none>
+web-app-clusterip-66865d4855-wnsrl   1/1     Running   0          2s    10.244.1.59   minikube-m02   <none>           <none>
+web-app-clusterip-66865d4855-wxzst   1/1     Running   0          2s    10.244.1.60   minikube-m02   <none>           <none>
+
+$ kubectl get svc web-service-clusterip
+NAME                    TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE
+web-service-clusterip   ClusterIP   10.100.66.42   <none>        8080/TCP   2s
+
+$ kubectl get endpoints web-service-clusterip
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+NAME                    ENDPOINTS                                      AGE
+web-service-clusterip   10.244.0.23:80,10.244.1.59:80,10.244.1.60:80   2s
+
+$ kubectl get endpointslices -l kubernetes.io/service-name=web-service-clusterip
+NAME                          ADDRESSTYPE   PORTS   ENDPOINTS                             AGE
+web-service-clusterip-l68xw   IPv4          80      10.244.1.60,10.244.1.59,10.244.0.23   2s
+
+$ kubectl describe svc web-service-clusterip
+Name:                     web-service-clusterip
+Namespace:                default
+Labels:                   app=web-clusterip
+Annotations:              <none>
+Selector:                 app=web-clusterip
+Type:                     ClusterIP
+IP Family Policy:         SingleStack
+IP Families:              IPv4
+IP:                       10.100.66.42
+IPs:                      10.100.66.42
+Port:                     http  8080/TCP
+TargetPort:               80/TCP
+Endpoints:                10.244.1.60:80,10.244.1.59:80,10.244.0.23:80
+Session Affinity:         None
+Internal Traffic Policy:  Cluster
+Events:                   <none>
+
+$ kubectl apply -f 01-clusterip/client-pod.yaml
+pod/curl-client created
+
+$ kubectl wait --for=condition=ready pod/curl-client --timeout=240s
+pod/curl-client condition met
+
+# three ways to reach the same Service from inside the cluster
+$ kubectl exec curl-client -- curl -s http://web-service-clusterip:8080 | grep -i '<title>'
+<title>Welcome to nginx!</title>
+
+$ kubectl exec curl-client -- curl -s http://web-service-clusterip.default.svc.cluster.local:8080 | grep -i '<title>'
+<title>Welcome to nginx!</title>
+
+$ kubectl exec curl-client -- curl -s http://10.100.66.42:8080 | grep -i '<title>'
+<title>Welcome to nginx!</title>
+
+# the VIP load-balances: 20 requests, count how many distinct pods answered
+$ kubectl exec curl-client -- sh -c 'for i in $(seq 1 20); do curl -s -o /dev/null -w "%{remote_ip}\n" http://web-service-clusterip:8080; done' | sort | uniq -c
+  20 10.100.66.42
+
+# the ClusterIP is virtual — it exists only as an iptables/nftables rule, it pings nothing
+$ kubectl exec curl-client -- ping -c 2 -W 2 10.100.66.42; echo "exit code: $?"
+PING 10.100.66.42 (10.100.66.42): 56 data bytes
+
+--- 10.100.66.42 ping statistics ---
+2 packets transmitted, 0 packets received, 100% packet loss
+command terminated with exit code 1
+exit code: 1
+
+
+########## TASK 2 addendum — actually proving the VIP load-balances ##########
+
+# curl's %{remote_ip} reports the address curl dialled (the VIP), not the backend that answered.
+# give each pod a distinguishable page instead, then count the answers.
+$ kubectl get pods -l app=web-clusterip -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.podIP}{"\n"}{end}'
+web-app-clusterip-66865d4855-ghktb 10.244.0.23
+web-app-clusterip-66865d4855-wnsrl 10.244.1.59
+web-app-clusterip-66865d4855-wxzst 10.244.1.60
+
+$ kubectl exec curl-client -- sh -c 'for i in $(seq 1 30); do curl -s http://web-service-clusterip:8080/whoami.txt; done' | sort | uniq -c
+  15 served-by: web-app-clusterip-66865d4855-ghktb
+  10 served-by: web-app-clusterip-66865d4855-wnsrl
+   5 served-by: web-app-clusterip-66865d4855-wxzst
+

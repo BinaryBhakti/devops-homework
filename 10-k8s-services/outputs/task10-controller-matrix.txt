@@ -1,0 +1,148 @@
+
+########## TASK 10 — Deployment vs StatefulSet vs DaemonSet, from the API ##########
+
+$ kubectl explain deployment.spec.strategy
+GROUP:      apps
+KIND:       Deployment
+VERSION:    v1
+
+FIELD: strategy <DeploymentStrategy>
+
+
+DESCRIPTION:
+    The deployment strategy to use to replace existing pods with new ones.
+    DeploymentStrategy describes how to replace existing pods with new ones.
+    
+FIELDS:
+  rollingUpdate	<RollingUpdateDeployment>
+    Rolling update config params. Present only if DeploymentStrategyType =
+    RollingUpdate.
+
+  type	<string>
+  enum: Recreate, RollingUpdate
+    Type of deployment. Can be "Recreate" or "RollingUpdate". Default is
+    RollingUpdate.
+    
+    Possible enum values:
+     - `"Recreate"` Kill all existing pods before creating new ones.
+     - `"RollingUpdate"` Replace the old ReplicaSets by new one using rolling
+    update i.e gradually scale down the old ReplicaSets and scale up the new
+    one.
+
+
+
+$ kubectl explain statefulset.spec.volumeClaimTemplates | head -20
+GROUP:      apps
+KIND:       StatefulSet
+VERSION:    v1
+
+FIELD: volumeClaimTemplates <[]PersistentVolumeClaim>
+
+
+DESCRIPTION:
+    volumeClaimTemplates is a list of claims that pods are allowed to reference.
+    The StatefulSet controller is responsible for mapping network identities to
+    claims in a way that maintains the identity of a pod. Every claim in this
+    list must have at least one matching (by name) volumeMount in one container
+    in the template. A claim in this list takes precedence over any volumes in
+    the template, with the same name.
+    PersistentVolumeClaim is a user's request for and claim to a persistent
+    volume
+    
+FIELDS:
+  apiVersion	<string>
+    APIVersion defines the versioned schema of this representation of an object.
+
+$ kubectl explain statefulset.spec.podManagementPolicy
+GROUP:      apps
+KIND:       StatefulSet
+VERSION:    v1
+
+FIELD: podManagementPolicy <string>
+ENUM:
+    OrderedReady
+    Parallel
+
+DESCRIPTION:
+    podManagementPolicy controls how pods are created during initial scale up,
+    when replacing pods on nodes, or when scaling down. The default policy is
+    `OrderedReady`, where pods are created in increasing order (pod-0, then
+    pod-1, etc) and the controller will wait until each pod is ready before
+    continuing. When scaling down, the pods are removed in the opposite order.
+    The alternative policy is `Parallel` which will create pods in parallel to
+    match the desired scale without waiting, and on scale down will delete all
+    pods at once.
+    
+    Possible enum values:
+     - `"OrderedReady"` will create pods in strictly increasing order on scale
+    up and strictly decreasing order on scale down, progressing only when the
+    previous pod is ready or terminated. At most one pod will be changed at any
+    time.
+     - `"Parallel"` will create and delete pods as soon as the stateful set
+    replica count is changed, and will not wait for pods to be ready or complete
+    termination.
+    
+
+
+$ kubectl explain daemonset.spec.updateStrategy
+GROUP:      apps
+KIND:       DaemonSet
+VERSION:    v1
+
+FIELD: updateStrategy <DaemonSetUpdateStrategy>
+
+
+DESCRIPTION:
+    An update strategy to replace existing DaemonSet pods with new pods.
+    DaemonSetUpdateStrategy is a struct used to control the update strategy for
+    a DaemonSet.
+    
+FIELDS:
+  rollingUpdate	<RollingUpdateDaemonSet>
+    Rolling update config params. Present only if type = "RollingUpdate".
+
+  type	<string>
+  enum: OnDelete, RollingUpdate
+    Type of daemon set update. Can be "RollingUpdate" or "OnDelete". Default is
+    RollingUpdate.
+    
+    Possible enum values:
+     - `"OnDelete"` Replace the old daemons only when it's killed
+     - `"RollingUpdate"` Replace the old daemons by new ones using rolling
+    update i.e replace them on each node one after the other.
+
+
+
+$ kubectl apply -f ../../09-k8s-core-objects/manifests/daemonset/node-agent-ds.yaml
+daemonset.apps/node-logging-agent created
+
+$ kubectl get deploy,sts,ds
+NAME                                READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/web-app-clusterip   3/3     3            3           3m21s
+deployment.apps/web-app-nodeport    2/2     2            2           3m13s
+
+NAME                            READY   AGE
+statefulset.apps/web-stateful   3/3     2m17s
+
+NAME                                DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR   AGE
+daemonset.apps/node-logging-agent   2         2         2       2            2           <none>          25s
+
+$ kubectl get pods -o wide --sort-by=.spec.nodeName
+NAME                                 READY   STATUS    RESTARTS   AGE     IP            NODE           NOMINATED NODE   READINESS GATES
+node-logging-agent-gngvd             1/1     Running   0          25s     10.244.0.28   minikube       <none>           <none>
+web-stateful-1                       1/1     Running   0          2m16s   10.244.0.26   minikube       <none>           <none>
+web-app-nodeport-6c8f48bd-hvxt2      1/1     Running   0          3m13s   10.244.0.24   minikube       <none>           <none>
+web-app-clusterip-66865d4855-pl8wp   1/1     Running   0          56s     10.244.0.27   minikube       <none>           <none>
+web-app-clusterip-66865d4855-wnsrl   1/1     Running   0          3m21s   10.244.1.59   minikube-m02   <none>           <none>
+node-logging-agent-6gch9             1/1     Running   0          25s     10.244.1.70   minikube-m02   <none>           <none>
+curl-client                          1/1     Running   0          3m19s   10.244.1.61   minikube-m02   <none>           <none>
+web-app-clusterip-66865d4855-wxzst   1/1     Running   0          3m21s   10.244.1.60   minikube-m02   <none>           <none>
+headless-dns-client                  1/1     Running   0          2m17s   10.244.1.67   minikube-m02   <none>           <none>
+web-app-nodeport-6c8f48bd-ktvp4      1/1     Running   0          3m13s   10.244.1.62   minikube-m02   <none>           <none>
+web-stateful-0                       1/1     Running   0          52s     10.244.1.69   minikube-m02   <none>           <none>
+dns-test-client                      1/1     Running   0          2m19s   10.244.1.65   minikube-m02   <none>           <none>
+web-stateful-2                       1/1     Running   0          2m14s   10.244.1.68   minikube-m02   <none>           <none>
+
+$ kubectl delete -f ../../09-k8s-core-objects/manifests/daemonset/node-agent-ds.yaml
+daemonset.apps "node-logging-agent" deleted from default namespace
+
