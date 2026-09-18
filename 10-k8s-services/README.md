@@ -9,6 +9,8 @@ cloud cost analysis, and a full diagnosis of why `<node-ip>:<nodePort>` does not
 **All output blocks are extracted verbatim** from the transcripts in [`outputs/`](outputs).
 Cluster: the two-node Minikube from [Homework 8](../08-k8s-fundamentals).
 
+The screenshots are **renders of those transcripts**, not captures of a live terminal — every lab ran non-interactively, so there was no window to photograph. Each image names its source transcript in the title bar; see [`screenshots/`](screenshots).
+
 ---
 
 # Task 1 — The four ports
@@ -79,6 +81,10 @@ Three things the schema makes explicit that the diagram cannot:
 
 The Task 2 Service is the whole table in one object: `port: 8080`, `targetPort: 80`. Clients
 dial `8080`; nginx has never heard of `8080`.
+
+
+![the four ports as the API schema defines them](screenshots/01-four-ports-explained.png)
+*the four ports as the API schema defines them*
 
 ---
 
@@ -182,6 +188,13 @@ All three pods answered. The split is 15/10/5, not 10/10/10 — kube-proxy picks
 That randomness is exactly the mechanism the canary split in
 [Homework 9, Task 12](../09-k8s-core-objects#task-12--canary-deployment) rides on.
 
+
+![the ClusterIP, its endpoints and the EndpointSlice](screenshots/02-clusterip-svc-endpoints.png)
+*the ClusterIP, its endpoints and the EndpointSlice*
+
+![name, FQDN and VIP all resolve; ping fails; 30 requests spread 15/10/5 across three pods](screenshots/02b-clusterip-curl-and-loadbalancing.png)
+*name, FQDN and VIP all resolve; ping fails; 30 requests spread 15/10/5 across three pods*
+
 ---
 
 # Task 3 — NodePort
@@ -258,6 +271,13 @@ $ curl --connect-timeout 5 -s -o /dev/null -w '%{http_code}\n' http://$(minikube
 000
 connection failed, as expected on the docker driver
 ```
+
+
+![the 80:30080 mapping and the macOS failure](screenshots/03-nodeport-mapping.png)
+*the 80:30080 mapping and the macOS failure*
+
+![all four node-to-node combinations returning 200, with matching iptables rule counts](screenshots/03b-nodeport-both-nodes.png)
+*all four node-to-node combinations returning 200, with matching iptables rule counts*
 
 ---
 
@@ -339,6 +359,13 @@ Meanwhile the Service works perfectly from inside the cluster, external IP or no
 $ kubectl exec curl-client -- curl -s http://web-service-loadbalancer | grep -i '<title>'
 <title>Welcome to nginx!</title>
 ```
+
+
+![EXTERNAL-IP <pending>, and the nodePort and ClusterIP allocated underneath](screenshots/04-loadbalancer-pending.png)
+*EXTERNAL-IP <pending>, and the nodePort and ClusterIP allocated underneath*
+
+![no passwordless sudo for minikube tunnel, so minikube service --url instead](screenshots/04b-loadbalancer-reachable.png)
+*no passwordless sudo for minikube tunnel, so minikube service --url instead*
 
 ---
 
@@ -432,6 +459,13 @@ external plain-TCP dependency — `postgres.default.svc.cluster.local` today poi
 hostname, switched to a real in-cluster StatefulSet later without touching a single line of
 application config.
 
+
+![ExternalName: a CNAME with no ClusterIP and no Endpoints object](screenshots/05-externalname-cname.png)
+*ExternalName: a CNAME with no ClusterIP and no Endpoints object*
+
+![the target is NXDOMAIN; against a live domain the SNI mismatch appears instead](screenshots/05b-externalname-tls-trap.png)
+*the target is NXDOMAIN; against a live domain the SNI mismatch appears instead*
+
 ---
 
 # Task 6 — Headless Service (`clusterIP: None`)
@@ -491,6 +525,10 @@ $ kubectl exec headless-dns-client -- curl -s http://web-stateful-0.web-service-
 `<pod>.<headless-service>.<namespace>.svc.cluster.local` — this is why a Kafka broker list or a
 MongoDB replica-set config can be written by hand and stay correct across restarts. A
 load-balanced VIP is useless to a database client that must reach **the primary**, specifically.
+
+
+![three A records for the headless name against one VIP for the ClusterIP service](screenshots/06-headless-dns-a-records.png)
+*three A records for the headless name against one VIP for the ClusterIP service*
 
 ---
 
@@ -567,6 +605,10 @@ Endpoints:                192.168.1.150:3306
 The clean use of the no-selector form: run the Service and Endpoints as separate objects, then
 migrate by deleting the manual Endpoints and adding a selector — the Service name and every
 client config stay untouched.
+
+
+![no selector means no Endpoints, until one is written by hand](screenshots/07-service-without-selector.png)
+*no selector means no Endpoints, until one is written by hand*
 
 ---
 
@@ -667,6 +709,13 @@ Its config explains why cluster names resolve instantly and external ones do not
 Caching is **disabled for `cluster.local`** (endpoints change constantly and must never be
 stale) and everything else is forwarded to the node's upstream resolver, cached for 30 s.
 
+
+![resolv.conf, the search-path expansion and the NXDOMAIN trail](screenshots/08-coredns-resolv-conf.png)
+*resolv.conf, the search-path expansion and the NXDOMAIN trail*
+
+![0.603s relative versus 0.205s rooted, over 30 lookups](screenshots/08b-ndots-penalty-measured.png)
+*0.603s relative versus 0.205s rooted, over 30 lookups*
+
 ---
 
 # Task 9 — Pod identity: Deployment vs StatefulSet
@@ -738,6 +787,10 @@ Same FQDN, new address, no client reconfiguration. That is the whole promise of 
 StatefulSet + headless Service pair — and the reason clustered databases are written against
 hostnames, never IPs.
 
+
+![new random name against web-stateful-0 returning as web-stateful-0](screenshots/09-pod-identity-deployment-vs-statefulset.png)
+*new random name against web-stateful-0 returning as web-stateful-0*
+
 ---
 
 # Task 10 — Deployment vs StatefulSet vs DaemonSet
@@ -808,6 +861,10 @@ choice for a stateful system whose members do not need to bootstrap in sequence.
 `updateStrategy: OnDelete` (available on both StatefulSets and DaemonSets) means Kubernetes
 changes nothing until *you* delete a pod — manual control for upgrades that need a human between
 each step.
+
+
+![Deployment, StatefulSet and DaemonSet running together, sorted by node](screenshots/10-controller-matrix.png)
+*Deployment, StatefulSet and DaemonSet running together, sorted by node*
 
 ---
 
@@ -1007,6 +1064,13 @@ only one that needs `sudo`, which this session did not have (see Task 4).
 | load balances | yes (via nodePort) | no — one pod | yes |
 | works on any cluster | minikube only | **any** | minikube only |
 | populates `EXTERNAL-IP` | no | no | **yes** |
+
+
+![no interface and no route to the node subnet, so curl times out](screenshots/12-minikube-nodeport-gotcha.png)
+*no interface and no route to the node subnet, so curl times out*
+
+![minikube service --url and kubectl port-forward, both returning 200](screenshots/12b-nodeport-workarounds.png)
+*minikube service --url and kubectl port-forward, both returning 200*
 
 ---
 
