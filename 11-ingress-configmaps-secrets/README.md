@@ -10,6 +10,8 @@ the full multi-tier stack end to end.
 **All output blocks are extracted verbatim** from the transcripts in [`outputs/`](outputs).
 Cluster: the two-node Minikube from [Homework 8](../08-k8s-fundamentals).
 
+The screenshots are **renders of those transcripts**, not captures of a live terminal — every lab ran non-interactively, so there was no window to photograph. Each image names its source transcript in the title bar; see [`screenshots/`](screenshots).
+
 Two findings worth flagging before you start, because both are bugs in the lab sheet's own
 commands rather than in Kubernetes:
 
@@ -75,6 +77,10 @@ JSONPath is how a CI pipeline reads one value without parsing YAML.
 **Why this matters:** the same container image now runs in dev, staging and production. What
 changes between them is a ConfigMap, not a rebuild — which is the whole point of the
 [twelve-factor](https://12factor.net/config) "store config in the environment" rule.
+
+
+![all five keys printed in full by describe](screenshots/01-configmap.png)
+*all five keys printed in full by describe*
 
 ---
 
@@ -150,6 +156,10 @@ terminate — `rollout restart` is an ordinary rolling update, so it is zero-dow
 | volume mount | yes, ~60 s | re-read the file (inotify / SIGHUP) |
 | `subPath` volume mount | **no** — a known trap | be restarted |
 
+
+![the ConfigMap says staging while the running pods still say production](screenshots/02-configmap-live-update.png)
+*the ConfigMap says staging while the running pods still say production*
+
 ---
 
 # Task 3 — Secrets, and what base64 is actually for
@@ -212,6 +222,10 @@ What actually protects a Secret:
 | **Encryption at rest** (`EncryptionConfiguration` on the API server) | **not enabled** — values sit in etcd as plain base64 |
 | Not mounting secrets the pod does not need | a manifest-review discipline |
 | External secret store | not installed here; see Task 5 |
+
+
+![describe prints byte counts; one pipe decodes the values](screenshots/03-secret-base64.png)
+*describe prints byte counts; one pipe decodes the values*
 
 ---
 
@@ -340,6 +354,13 @@ data:
 
 The best answer is `stringData:` — you never touch base64 at all, so the bug cannot occur.
 
+
+![the 0a byte, and 15 bytes against 14](screenshots/04-trailing-newline.png)
+*the 0a byte, and 15 bytes against 14*
+
+![the two places the bug actually enters, and the safe alternatives](screenshots/04b-newline-where-it-enters.png)
+*the two places the bug actually enters, and the safe alternatives*
+
 ---
 
 # Task 5 — What this cluster has, and what production adds
@@ -432,6 +453,10 @@ The alternatives, and when each fits:
 Also worth turning on regardless: **encryption at rest** via an `EncryptionConfiguration` on the
 API server, so etcd holds ciphertext rather than base64. It is off by default, including here.
 
+
+![native Secrets only, and a kubeconfig that can list them cluster-wide](screenshots/05-enterprise-secrets.png)
+*native Secrets only, and a kubeconfig that can list them cluster-wide*
+
 ---
 
 # Task 6 — One pod, both sources
@@ -483,6 +508,10 @@ Why the asymmetry is the right default:
 > and would also appear in a crash dump or a process listing. Env-var injection is convenient,
 > not confidential; file-based mounts (or Vault's injector) are the stronger option.
 
+
+![seven variables from two objects, indistinguishable inside the container](screenshots/06-combined-injection.png)
+*seven variables from two objects, indistinguishable inside the container*
+
 ---
 
 # Task 7 — Ingress resource vs Ingress controller
@@ -519,6 +548,10 @@ its own config (for NGINX, a real `nginx.conf`) → reloads. Every annotation in
 here (`rewrite-target`, `use-regex`, `ssl-redirect`) is an instruction to *that specific
 implementation* — which is exactly why the Gateway API was created, to move those knobs into the
 typed API instead of string annotations.
+
+
+![the Ingress API present with no controller and no IngressClass](screenshots/07-ingress-api-no-controller.png)
+*the Ingress API present with no controller and no IngressClass*
 
 ---
 
@@ -575,6 +608,10 @@ ingress-nginx-controller-d7cd8c989-ncxrt   1/1     Running     0          21m   
 > connection. The pod sat at `ContainerCreating`/`0/1` the whole time — worth knowing so you do
 > not start debugging a healthy install.
 
+
+![the controller, its admission webhook Service and the two certgen Jobs](screenshots/08-ingress-controller-ready.png)
+*the controller, its admission webhook Service and the two certgen Jobs*
+
 ---
 
 # Task 9 — Local DNS, and why `/etc/hosts` is not enough here
@@ -628,6 +665,10 @@ on the `Host` header and does not care how the packet arrived.
 > ```
 >
 > On bare-metal Linux, the `/etc/hosts` line alone is enough; no tunnel needed.
+
+
+![minikube ip, an empty /etc/hosts, and no route from macOS](screenshots/09-local-dns.png)
+*minikube ip, an empty /etc/hosts, and no route from macOS*
 
 ---
 
@@ -727,6 +768,10 @@ NGINX Ingress controller
 A real nginx 1.27.1 inside the controller pod, running a config generated from the Ingress
 object.
 
+
+![/ to the frontend and /api to the backend, with backends resolved to pod IPs](screenshots/10-path-routing.png)
+*/ to the frontend and /api to the backend, with backends resolved to pod IPs*
+
 ---
 
 # Tasks 11 & 12 — Host-based and hybrid routing
@@ -793,6 +838,13 @@ http -> 308 https://portal.campus.local/
 `ssl-redirect: "true"` (the default whenever a host has TLS configured) turns plain HTTP into a
 **308 Permanent Redirect** to HTTPS. Compare `yatri-ingress`, which sets it to `"false"` and
 therefore serves HTTP directly — the two behaviours side by side on the same controller.
+
+
+![one Ingress, two hosts, different backends and path rules](screenshots/11-host-based-routing.png)
+*one Ingress, two hosts, different backends and path rules*
+
+![host isolation, the deliberate 404, and the 308 to HTTPS](screenshots/12-hybrid-routing-and-redirect.png)
+*host isolation, the deliberate 404, and the 308 to HTTPS*
 
 ---
 
@@ -937,6 +989,13 @@ rotate certificates, one place to configure ciphers, for every service behind th
 hand-run `openssl` — but the mechanism is identical: a `kubernetes.io/tls` Secret named in
 `spec.tls`.)
 
+
+![HTTP/2 200 while serving CN=Kubernetes Ingress Controller Fake Certificate](screenshots/13-tls-wrong-certificate.png)
+*HTTP/2 200 while serving CN=Kubernetes Ingress Controller Fake Certificate*
+
+![regenerated with SANs, then verified with --cacert and no -k](screenshots/13b-tls-fixed-and-verified.png)
+*regenerated with SANs, then verified with --cacert and no -k*
+
 ---
 
 # Task 14 — End to end
@@ -1046,6 +1105,13 @@ ConfigMap deleted
 `cleanup.sh` deletes in the reverse order of creation and uses `--ignore-not-found` throughout,
 so it is idempotent — running it twice is not an error. That is the property that makes a
 teardown script safe to put in CI.
+
+
+![the whole stack: ConfigMap, Secret, two tiers and the Ingress](screenshots/14-full-demo.png)
+*the whole stack: ConfigMap, Secret, two tiers and the Ingress*
+
+![cleanup.sh removing everything, verified](screenshots/14b-cleanup.png)
+*cleanup.sh removing everything, verified*
 
 ---
 
