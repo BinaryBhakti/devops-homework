@@ -2,7 +2,7 @@
 
 Course session: **`session-12-ingress-configmaps-secrets`**.
 
-Fourteen tasks: decoupling configuration into ConfigMaps, the fact that patching one does
+Sixteen tasks: decoupling configuration into ConfigMaps, the fact that patching one does
 nothing to running pods, Secrets and what base64 does and does not buy you, the trailing-newline
 bug, the NGINX Ingress Controller, path- and host-based Layer 7 routing, TLS termination, and
 the full multi-tier stack end to end.
@@ -20,6 +20,20 @@ commands rather than in Kubernetes:
 - **Task 4** — `--from-literal="$(echo ...)"` does *not* reproduce the newline bug, because
   command substitution strips trailing newlines. The two places the bug actually lives are
   identified and demonstrated.
+
+## Session 12 brief — where each task is answered
+
+The course later published a consolidated Session 12 brief with five tasks. Tasks 1–3 are
+covered by the original lab below; Tasks 4 and 5 were added afterwards as their own folders,
+each with its own README.
+
+| Brief | Where |
+|---|---|
+| **Task 1 — ConfigMap**: create, store values, inject, verify inside the container | [Task 1](#task-1--configmap), [Task 2](#task-2--patching-a-live-configmap-does-not-touch-running-pods), [Task 6](#task-6--one-pod-both-sources) · YAML: [`manifests/01-configmap/`](manifests/01-configmap) |
+| **Task 2 — Secret**: create, store, inject, verify, why not to commit to Git | [Task 3](#task-3--secrets-and-what-base64-is-actually-for), [Task 5](#task-5--what-this-cluster-has-and-what-production-adds), [Task 6](#task-6--one-pod-both-sources) · YAML: [`manifests/02-secret/`](manifests/02-secret) |
+| **Task 3 — Ingress**: deploy, Service, Ingress, access, verify routing | [Tasks 8–14](#task-8--enabling-the-nginx-ingress-controller) · YAML: [`manifests/03-ingress/`](manifests/03-ingress), [`manifests/04-full-demo/`](manifests/04-full-demo) |
+| **Task 4 — Ingress vs Ingress Controller** README | **[`ingress-vs-ingress-controller/README.md`](ingress-vs-ingress-controller)**, summarised in [Task 15](#task-15--ingress-vs-ingress-controller-readme) |
+| **Task 5 — Troubleshooting** with before/after and screenshots | **[`troubleshooting/README.md`](troubleshooting)**, summarised in [Task 16](#task-16--troubleshooting-the-course-incident-reproduced-against-real-postgresql) |
 
 ---
 
@@ -1115,11 +1129,61 @@ teardown script safe to put in CI.
 
 ---
 
+# Task 15 — Ingress vs Ingress Controller (README)
+
+Full write-up: **[`ingress-vs-ingress-controller/README.md`](ingress-vs-ingress-controller)**.
+
+[Task 7](#task-7--ingress-resource-vs-ingress-controller) showed the distinction on an empty
+cluster. This README proves it three ways on a live one:
+
+1. An Ingress for class `nginx` is claimed. It gets an `ADDRESS`, routes by `Host` header
+   (`hello from SHOP` / `hello from BLOG`), and shows up as two `server_name` blocks in the
+   controller's real `nginx.conf`.
+2. An equally valid Ingress for class `traefik`, with no Traefik installed, is accepted by the
+   API server and then ignored: no `ADDRESS`, no events, `0` lines in `nginx.conf`, HTTP 404.
+3. With the controller scaled to zero, the Ingress rules are untouched but curl fails to
+   connect (exit code 7). Scaled back to one, the same unchanged Ingress works.
+
+It also covers IngressClass as the link between the two halves, why both are needed, a table
+of real controllers, and where things are heading (Gateway API; ingress-nginx's retirement).
+
+![an Ingress the controller claims, and the nginx.conf it renders](screenshots/15b-ingress-claimed-by-controller.png)
+*an Ingress the controller claims, and the nginx.conf it renders*
+
+---
+
+# Task 16 — Troubleshooting: the course incident, reproduced against real PostgreSQL
+
+Full write-up with before/after output: **[`troubleshooting/README.md`](troubleshooting)**.
+
+The course's `troubleshooting/secret-base64-gotcha.md` describes an app rejected with
+`password authentication failed` because its Secret was built with `echo | base64`. Here it is
+reproduced for real: a Postgres Deployment with a correct Secret, and an app whose own Secret
+has the hidden `\n`. The app crash-loops, and the write-up walks through identify →
+investigate (both logs, ruling out DNS, user, `pg_hba.conf` and env injection) → compare the
+bytes → **prove** it with a probe pod (15 bytes fails, 14 bytes `auth ok`) → fix with
+`stringData:` → roll the Deployment → verify five ways.
+
+One honest note: the first version of the probe used `$(printf 'pw\n')` and *authenticated
+successfully*, because command substitution strips the newline. That is the same trap as in
+[Task 4](#task-4--the-trailing-newline-bug), this time hit by me.
+
+![root cause: one 0x0a byte, proved with a probe pod](screenshots/16b-troubleshooting-root-cause.png)
+*root cause: one 0x0a byte, proved with a probe pod*
+
+---
+
 ## Files
 
 ```
 11-ingress-configmaps-secrets/
 ├── README.md
+├── ingress-vs-ingress-controller/   Session 12 Task 4
+│   ├── README.md
+│   └── apps.yaml  ingress-nginx-class.yaml  ingress-no-controller.yaml
+├── troubleshooting/                 Session 12 Task 5
+│   ├── README.md
+│   └── postgres.yaml  app.yaml  app-secret-broken.yaml  app-secret-fixed.yaml  probe-pod.yaml
 ├── manifests/
 │   ├── 01-configmap/  app-config.yaml
 │   ├── 02-secret/     db-secret.yaml
@@ -1138,6 +1202,9 @@ teardown script safe to put in CI.
 │   ├── task10-path-routing.txt
 │   ├── task11-12-host-and-hybrid-routing.txt
 │   ├── task13-tls-termination.txt
-│   └── task14-full-demo.txt
+│   ├── task14-full-demo.txt
+│   ├── task15-ingress-vs-controller.txt
+│   ├── task16-troubleshooting-before.txt
+│   └── task16-troubleshooting-after.txt
 └── screenshots/
 ```

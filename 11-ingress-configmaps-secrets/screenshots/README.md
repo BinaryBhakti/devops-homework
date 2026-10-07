@@ -1,6 +1,8 @@
 # Screenshots — Homework 11 (Session 12)
 
-17 images, one or more per task, referenced inline from [../README.md](../README.md).
+24 images, one or more per task, referenced inline from [../README.md](../README.md),
+[../ingress-vs-ingress-controller/README.md](../ingress-vs-ingress-controller/README.md) and
+[../troubleshooting/README.md](../troubleshooting/README.md).
 
 ## What these are
 
