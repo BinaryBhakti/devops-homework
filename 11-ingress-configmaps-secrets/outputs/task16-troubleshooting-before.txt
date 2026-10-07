@@ -1,0 +1,66 @@
+########## TASK 16 — Troubleshooting: "password authentication failed" (BEFORE: reproduce + investigate) ##########
+
+# set up the incident: database with a correct admin Secret, app with a hand-written Secret
+$ kubectl apply -f postgres.yaml -f app-secret-broken.yaml -f app.yaml
+secret/db-admin created
+deployment.apps/postgres created
+service/postgres created
+secret/app-db-credentials created
+deployment.apps/booking-api created
+
+$ kubectl rollout status deploy/postgres --timeout=180s
+Waiting for deployment "postgres" rollout to finish: 0 of 1 updated replicas are available...
+deployment "postgres" successfully rolled out
+
+$ kubectl wait pod -l app=booking-api --for=jsonpath={.status.containerStatuses[0].state.waiting.reason}=CrashLoopBackOff --timeout=240s
+pod/booking-api-56f75df65b-slqqm condition met
+
+$ kubectl get pods -l "app in (postgres,booking-api)"
+NAME                           READY   STATUS             RESTARTS      AGE
+booking-api-56f75df65b-slqqm   0/1     CrashLoopBackOff   1 (16s ago)   26s
+postgres-685c886db8-bmfwk      1/1     Running            0             26s
+
+# STEP 1 — identify: what state is it in, and how did it get there?
+$ kubectl describe pod -l app=booking-api | sed -n '/^Init Containers:/,/^Containers:/{/State:\|Reason:\|Exit Code:/p;}; /^Containers:/,/Restart Count/{/State:\|Reason:\|Exit Code:\|Restart Count/p;}'
+
+$ kubectl get events --field-selector involvedObject.kind=Pod --sort-by=.lastTimestamp | grep booking-api | grep -E 'BackOff' | tail -1 | cut -c1-150
+15s         Warning   BackOff     pod/booking-api-56f75df65b-slqqm   Back-off restarting failed container api in pod booking-api-56f75df65b-slqqm_defa
+
+# init container: Completed (the database was reachable). app container: exit code 2 = the app exited on its own — so read its log
+# STEP 2 — investigate: logs from both ends of the connection
+$ kubectl logs deploy/booking-api -c api
+booking-api: connecting to postgres as yatri_admin ...
+psql: error: connection to server at "postgres" (10.107.110.113), port 5432 failed: FATAL:  password authentication failed for user "yatri_admin"
+
+$ kubectl logs deploy/postgres | grep -A1 'password authentication failed' | tail -2
+2026-10-07 16:09:43.531 UTC [106] FATAL:  password authentication failed for user "yatri_admin"
+2026-10-07 16:09:43.531 UTC [106] DETAIL:  Connection matched file "/var/lib/postgresql/data/pg_hba.conf" line 128: "host all all all scram-sha-256"
+
+# the server confirms: the user exists and pg_hba.conf allows the connection — only the password is rejected
+# STEP 3 — the env vars are wired up (the app printed $DB_USER), so compare the app copy of the password with the DB copy
+$ kubectl get secret app-db-credentials -o jsonpath='{.data.DB_PASSWORD}'; echo
+c2VjcmV0cGFzc3dvcmQK
+
+$ kubectl get secret db-admin -o jsonpath='{.data.POSTGRES_PASSWORD}'; echo
+c2VjcmV0cGFzc3dvcmQ=
+
+$ kubectl get secret app-db-credentials -o jsonpath='{.data.DB_PASSWORD}' | base64 -d | xxd
+00000000: 7365 6372 6574 7061 7373 776f 7264 0a    secretpassword.
+
+$ kubectl get secret db-admin -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d | xxd
+00000000: 7365 6372 6574 7061 7373 776f 7264       secretpassword
+
+# STEP 4 — prove the hypothesis before changing anything: same password, with and without the trailing newline
+$ kubectl apply -f probe-pod.yaml && kubectl wait pod/pg-probe --for=jsonpath={.status.phase}=Succeeded --timeout=120s
+pod/pg-probe created
+pod/pg-probe condition met
+
+$ kubectl logs pg-probe
+with newline    (15 bytes): error: connection to server at "postgres" (10.107.110.113), port 5432 failed: FATAL:  password authentication failed for user "yatri_admin"
+without newline (14 bytes): auth ok
+
+$ kubectl delete pod pg-probe
+pod "pg-probe" deleted from default namespace
+
+# ROOT CAUSE: app-db-credentials was written with `echo "secretpassword" | base64`. echo appends \n (0x0a), so the
+# app sends a 15-byte password to a database that expects 14. The base64 differs in ONE character (...QK vs ...Q=).

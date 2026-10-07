@@ -1,0 +1,64 @@
+########## TASK 16 — Troubleshooting (AFTER: fix + verify) ##########
+
+$ kubectl get pods -l app=booking-api
+NAME                           READY   STATUS   RESTARTS      AGE
+booking-api-56f75df65b-slqqm   0/1     Error    2 (21s ago)   31s
+
+# FIX: replace the hand-encoded data: block with stringData: — Kubernetes does the encoding, so there is no echo and no newline
+$ diff app-secret-broken.yaml app-secret-fixed.yaml
+1,3c1
+< # The application's copy of the credentials, written by hand by a developer:
+< #   echo "secretpassword" | base64      ->  c2VjcmV0cGFzc3dvcmQK
+< # The value LOOKS right. It decodes to "secretpassword\n".
+---
+> # Fixed: stringData — Kubernetes does the encoding, so there is no echo, no base64 and no newline.
+9,12c7,10
+< data:
+<   DB_USER: eWF0cmlfYWRtaW4=          # yatri_admin
+<   DB_NAME: eWF0cmlfcHJvZHVjdGlvbl9kYg==  # yatri_production_db
+<   DB_PASSWORD: c2VjcmV0cGFzc3dvcmQK  # BUG: trailing \n
+---
+> stringData:
+>   DB_USER: yatri_admin
+>   DB_NAME: yatri_production_db
+>   DB_PASSWORD: secretpassword
+
+$ kubectl apply -f app-secret-fixed.yaml
+secret/app-db-credentials configured
+
+$ kubectl get secret app-db-credentials -o jsonpath='{.data.DB_PASSWORD}' | base64 -d | xxd
+00000000: 7365 6372 6574 7061 7373 776f 7264       secretpassword
+
+# env vars from a Secret are read when a container is created, so roll the Deployment to get containers built from the fixed Secret
+$ kubectl rollout restart deploy/booking-api && kubectl rollout status deploy/booking-api --timeout=180s
+deployment.apps/booking-api restarted
+Waiting for deployment "booking-api" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "booking-api" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "booking-api" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "booking-api" rollout to finish: 1 old replicas are pending termination...
+deployment "booking-api" successfully rolled out
+
+$ kubectl wait --for=delete pod -l app=booking-api --field-selector=status.phase!=Running --timeout=90s >/dev/null 2>&1; sleep 5; kubectl get pods -l "app in (postgres,booking-api)"
+NAME                           READY   STATUS    RESTARTS   AGE
+booking-api-7bdbf5db66-fgdv2   1/1     Running   0          8s
+postgres-685c886db8-bmfwk      1/1     Running   0          40s
+
+# VERIFY — the app log, the bytes it now holds, a query using its own credentials, and a quiet database log
+$ kubectl logs deploy/booking-api -c api
+booking-api: connecting to postgres as yatri_admin ...
+connected to yatri_production_db as yatri_admin
+booking-api: ready
+
+$ kubectl exec deploy/booking-api -c api -- sh -c 'printf %s "$DB_PASSWORD" | xxd'
+00000000: 7365 6372 6574 7061 7373 776f 7264       secretpassword
+
+$ kubectl exec deploy/booking-api -c api -- sh -c 'PGPASSWORD="$DB_PASSWORD" psql -h postgres -U "$DB_USER" -d "$DB_NAME" -tAc "select current_user || chr(32) || now()::time(0)"'
+yatri_admin 16:09:58
+
+$ sleep 30; kubectl logs deploy/postgres --since=30s | grep -c 'password authentication failed'
+0
+
+$ kubectl get pods -l app=booking-api -o custom-columns=POD:.metadata.name,READY:.status.containerStatuses[0].ready,RESTARTS:.status.containerStatuses[0].restartCount
+POD                            READY   RESTARTS
+booking-api-7bdbf5db66-fgdv2   true    0
+

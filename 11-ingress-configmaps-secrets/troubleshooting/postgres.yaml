@@ -1,0 +1,43 @@
+# The database, owned by the "DB team". Its admin Secret uses stringData, so it is correct.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-admin
+type: Opaque
+stringData:
+  POSTGRES_USER: yatri_admin
+  POSTGRES_PASSWORD: secretpassword
+  POSTGRES_DB: yatri_production_db
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          envFrom:
+            - secretRef: { name: db-admin }
+          ports: [{ containerPort: 5432 }]
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "yatri_admin", "-d", "yatri_production_db"] }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector: { app: postgres }
+  ports: [{ port: 5432 }]

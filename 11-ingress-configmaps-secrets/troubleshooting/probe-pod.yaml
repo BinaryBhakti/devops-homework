@@ -1,0 +1,21 @@
+# One-shot diagnostic pod. Tries the same password twice: once with a trailing newline
+# (exactly what the broken Secret delivers), once without.
+# Note: PW="$(printf 'x\n')" would NOT reproduce it — command substitution strips trailing
+# newlines — so the newline is kept by appending a sentinel character and removing it.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pg-probe
+spec:
+  restartPolicy: Never
+  containers:
+    - name: probe
+      image: postgres:16-alpine
+      command: ["sh", "-c"]
+      args:
+        - |
+          PW_NL="$(printf 'secretpassword\nX')"; PW_NL="${PW_NL%X}"
+          printf 'with newline    (%s bytes): ' "$(printf '%s' "$PW_NL" | wc -c)"
+          PGPASSWORD="$PW_NL" psql -h postgres -U yatri_admin -d yatri_production_db -tAc "select 'auth ok'" 2>&1 | sed 's/^psql: //'
+          printf 'without newline (%s bytes): ' "$(printf '%s' secretpassword | wc -c)"
+          PGPASSWORD=secretpassword psql -h postgres -U yatri_admin -d yatri_production_db -tAc "select 'auth ok'"

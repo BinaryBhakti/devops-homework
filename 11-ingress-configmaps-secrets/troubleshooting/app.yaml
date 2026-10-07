@@ -1,0 +1,39 @@
+# A stand-in for the booking API: on start it connects to Postgres; if it cannot, it exits
+# non-zero (exactly what a real app does on a failed DB handshake), so the pod crash-loops.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: booking-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: booking-api }
+  template:
+    metadata:
+      labels: { app: booking-api }
+    spec:
+      # don't let "database not up yet" masquerade as an auth failure
+      initContainers:
+        - name: wait-for-db
+          image: postgres:16-alpine
+          command: ["sh", "-c", "until pg_isready -h postgres -q; do sleep 1; done"]
+      containers:
+        - name: api
+          image: postgres:16-alpine
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "booking-api: connecting to postgres as $DB_USER ..."
+              PGPASSWORD="$DB_PASSWORD" psql -h postgres -U "$DB_USER" -d "$DB_NAME" -tAc \
+                "select 'connected to ' || current_database() || ' as ' || current_user" || exit 2
+              echo "booking-api: ready"; exec sleep infinity
+          env:
+            - name: DB_USER
+              valueFrom: { secretKeyRef: { name: app-db-credentials, key: DB_USER } }
+            - name: DB_NAME
+              valueFrom: { secretKeyRef: { name: app-db-credentials, key: DB_NAME } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: app-db-credentials, key: DB_PASSWORD } }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 64Mi }
