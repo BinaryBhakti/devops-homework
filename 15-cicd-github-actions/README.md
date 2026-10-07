@@ -323,7 +323,62 @@ The final version of the workflow was linted again just before pushing; see
 
 ## Pipeline runs on GitHub
 
-<!-- PIPELINE-RUNS -->
+The workflow lives at the repository root,
+[`.github/workflows/hw15-cicd.yml`](../.github/workflows/hw15-cicd.yml), because GitHub only runs
+workflows from there. Its `paths:` filter means it only fires for changes to this folder or to
+the workflow itself.
+
+| Run | Commit | Result | Link |
+|---|---|---|---|
+| #1 | `73c4def` adding this homework | **failed** in *Push image to GHCR*, exit code 2 | [run 37668969228](https://github.com/BinaryBhakti/devops-homework/actions/runs/37668969228) |
+| #2 | `b3a7757` the fix | **success**: all 7 jobs green, 2 m 52 s, 5 artifacts | [run 37672449184](https://github.com/BinaryBhakti/devops-homework/actions/runs/37672449184) |
+
+These are real browser screenshots of the public run pages, taken with headless Chrome. The
+step logs themselves need a signed-in GitHub account to view.
+
+![run #2: lint, secrets demo, the Python 3.12/3.13 matrix, Docker build, GHCR push and the kind deploy, all green](screenshots/github-run-2-success.png)
+*run #2: lint, secrets demo, the Python 3.12/3.13 matrix, Docker build, GHCR push and the kind deploy, all green*
+
+The run page shows the concepts from this write-up as GitHub draws them:
+- **Jobs and `needs:`** form the graph. *Lint* and *Secrets demo* run in parallel, the
+  **matrix** fans out into two test jobs, and everything after that is sequential.
+- **Artifacts** listed at the bottom: `coverage-report`, `junit-py3.12`, `junit-py3.13`, and
+  the `hw15-image` tarball handed from the build job to the push job, so the image that gets
+  pushed is the exact one that was tested.
+- **Runners**: every job ran on a fresh `ubuntu-latest` VM. The annotation on each job is
+  GitHub announcing that `ubuntu-latest` moves to Ubuntu 26 on 19 October 2026, which is a
+  good reason to pin `ubuntu-24.04` in anything that matters.
+
+### Run #1 failed, and why
+
+![run #1: the push job failed with exit code 2; deploy was skipped](screenshots/github-run-1-failed-push.png)
+*run #1: the push job failed with exit code 2; deploy was skipped*
+
+CI passed. CD failed at the first CD step:
+
+```yaml
+run: |
+  for t in ${{ needs.build.outputs.tags }}; do docker push "$t"; done
+```
+
+`docker/metadata-action` returns its tags **one per line** (`…:sha-73c4def` and `…:latest`).
+`${{ }}` is substituted into the script text *before* bash sees it, so the `for` statement was
+split across two lines. That is a bash syntax error, which is why the exit code was **2**
+rather than the 1 a failed `docker push` would give. Local validation could not catch it:
+actionlint checks the expression syntax, but cannot know that the value will contain a newline.
+
+The fix (commit `b3a7757`) passes the value through `env:`:
+
+```yaml
+env:
+  TAGS: ${{ needs.build.outputs.tags }}
+run: |
+  for t in $TAGS; do docker push "$t"; done
+```
+
+This is also GitHub's own security guidance. Interpolating `${{ }}` directly into `run:` is how
+**script injection** happens when the value comes from a PR title or branch name. An
+environment variable is data, never code.
 
 ---
 
