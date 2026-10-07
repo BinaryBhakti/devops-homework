@@ -1,0 +1,112 @@
+########## TASK 2 — HPA hands-on with the course hpa.yaml ##########
+
+# STEP 1 — deploy the application
+$ kubectl apply -f deployment.yaml -f service.yaml
+deployment.apps/hpa-demo created
+service/hpa-demo-service created
+
+$ kubectl rollout status deploy/hpa-demo --timeout=120s
+Waiting for deployment spec update to be observed...
+Waiting for deployment "hpa-demo" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "hpa-demo" rollout to finish: 0 of 1 updated replicas are available...
+deployment "hpa-demo" successfully rolled out
+
+$ kubectl get deploy hpa-demo -o jsonpath='{.spec.template.spec.containers[0].resources}{"\n"}'
+{"limits":{"cpu":"200m"},"requests":{"cpu":"100m"}}
+
+# STEP 2 — configure the HPA
+$ cat hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hpa-demo
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hpa-demo
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+
+$ kubectl apply -f hpa.yaml
+horizontalpodautoscaler.autoscaling/hpa-demo created
+
+# STEP 3 — verify the HPA (metrics-server needs a scrape or two before TARGETS stops being <unknown>)
+$ kubectl get apiservice v1beta1.metrics.k8s.io
+NAME                     SERVICE                      AVAILABLE   AGE
+v1beta1.metrics.k8s.io   kube-system/metrics-server   True        8m22s
+
+$ kubectl get hpa hpa-demo
+NAME       REFERENCE             TARGETS              MINPODS   MAXPODS   REPLICAS   AGE
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1         5         1          0s
+
+$ kubectl get hpa hpa-demo
+NAME       REFERENCE             TARGETS       MINPODS   MAXPODS   REPLICAS   AGE
+hpa-demo   Deployment/hpa-demo   cpu: 0%/50%   1         5         1          2m16s
+
+$ kubectl top pods -l app=hpa-demo
+NAME                        CPU(cores)   MEMORY(bytes)   
+hpa-demo-5d6676989b-665ch   0m           18Mi            
+
+$ kubectl describe hpa hpa-demo
+Name:                                                  hpa-demo
+Namespace:                                             default
+Labels:                                                <none>
+Annotations:                                           <none>
+CreationTimestamp:                                     Wed, 07 Oct 2026 21:54:29 +0530
+Reference:                                             Deployment/hpa-demo
+Metrics:                                               ( current / target )
+  resource cpu on pods  (as a percentage of request):  0% (0) / 50%
+Min replicas:                                          1
+Max replicas:                                          5
+Deployment pods:                                       1 current / 1 desired
+Conditions:
+  Type            Status  Reason               Message
+  ----            ------  ------               -------
+  AbleToScale     True    ScaleDownStabilized  recent recommendations were higher than current one, applying the highest recent recommendation
+  ScalingActive   True    ValidMetricFound     the HPA was able to successfully calculate a replica count from cpu resource utilization (percentage of request)
+  ScalingLimited  False   DesiredWithinRange   the desired count is within the acceptable range
+Events:
+  Type     Reason                        Age                  From                       Message
+  ----     ------                        ----                 ----                       -------
+  Warning  FailedGetResourceMetric       90s (x4 over 2m16s)  horizontal-pod-autoscaler  failed to get cpu utilization: unable to get metrics for resource cpu: no metrics returned from resource metrics API
+  Warning  FailedComputeMetricsReplicas  90s (x4 over 2m16s)  horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get cpu resource metric value: failed to get cpu utilization: unable to get metrics for resource cpu: no metrics returned from resource metrics API
+  Warning  FailedGetResourceMetric       27s (x4 over 75s)    horizontal-pod-autoscaler  failed to get cpu utilization: did not receive metrics for targeted pods (pods might be unready)
+  Warning  FailedComputeMetricsReplicas  27s (x4 over 75s)    horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get cpu resource metric value: failed to get cpu utilization: did not receive metrics for targeted pods (pods might be unready)
+
+# STEP 4 — deploy the load generator (1 worker)
+$ kubectl apply -f load-generator.yaml && kubectl rollout status deploy/load-generator --timeout=120s
+deployment.apps/load-generator created
+Waiting for deployment spec update to be observed...
+Waiting for deployment "load-generator" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "load-generator" rollout to finish: 0 of 1 updated replicas are available...
+deployment "load-generator" successfully rolled out
+
+# STEP 6/7 — observe CPU utilisation and pod scaling under load
+$ kubectl get hpa hpa-demo
+Unable to connect to the server: net/http: TLS handshake timeout
+
+$ kubectl top pods -l app=hpa-demo
+Unable to connect to the server: net/http: TLS handshake timeout
+
+$ kubectl get pods -l app=hpa-demo -o wide
+Unable to connect to the server: net/http: TLS handshake timeout
+
+$ kubectl describe hpa hpa-demo | sed -n '/Conditions:/,$p'
+Unable to connect to the server: net/http: TLS handshake timeout
+
+$ kubectl get events --field-selector involvedObject.name=hpa-demo,reason=SuccessfulRescale -o custom-columns=TIME:.lastTimestamp,MESSAGE:.message
+TIME   MESSAGE
+Unable to connect to the server: net/http: TLS handshake timeout
+
+# STEP 8 — stop the load and watch the scale-down (default stabilization window: 300 s)
+$ kubectl delete deploy/load-generator
+Unable to connect to the server: net/http: TLS handshake timeout
+

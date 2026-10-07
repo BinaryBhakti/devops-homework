@@ -1,0 +1,184 @@
+########## TASK 2 — HPA timeline: kubectl get hpa + kubectl top pods every 15 s ##########
+
+# columns: NAME REFERENCE TARGETS MINPODS MAXPODS REPLICAS AGE / POD CPU MEMORY
+===== 22:25:47 load generator: 2 workers
+----- 22:25:47
+hpa-demo   Deployment/hpa-demo   cpu: 0%/50%   1     5     1     107s
+hpa-demo-5d6676989b-r2z9v   0m    7Mi   
+----- 22:26:02
+hpa-demo   Deployment/hpa-demo   cpu: 0%/50%   1     5     1     2m2s
+hpa-demo-5d6676989b-r2z9v   0m    7Mi   
+----- 22:26:17
+hpa-demo   Deployment/hpa-demo   cpu: 0%/50%   1     5     1     2m18s
+hpa-demo-5d6676989b-r2z9v   0m    7Mi   
+----- 22:26:33
+hpa-demo   Deployment/hpa-demo   cpu: 0%/50%   1     5     1     2m33s
+hpa-demo-5d6676989b-r2z9v   18m   7Mi   
+----- 22:26:48
+hpa-demo   Deployment/hpa-demo   cpu: 18%/50%   1     5     1     2m52s
+hpa-demo-5d6676989b-r2z9v   18m   7Mi   
+----- 22:27:10
+hpa-demo   Deployment/hpa-demo   cpu: 18%/50%   1     5     1     3m11s
+hpa-demo-5d6676989b-r2z9v   18m   7Mi   
+----- 22:27:27
+hpa-demo   Deployment/hpa-demo   cpu: 18%/50%   1     5     1     3m27s
+hpa-demo-5d6676989b-r2z9v   30m   8Mi   
+----- 22:27:43
+hpa-demo   Deployment/hpa-demo   cpu: 30%/50%   1     5     1     3m44s
+hpa-demo-5d6676989b-r2z9v   30m   8Mi   
+----- 22:27:59
+hpa-demo   Deployment/hpa-demo   cpu: 30%/50%   1     5     1     4m
+hpa-demo-5d6676989b-r2z9v   30m   8Mi   
+----- 22:28:15
+hpa-demo   Deployment/hpa-demo   cpu: 30%/50%   1     5     1     4m15s
+hpa-demo-5d6676989b-r2z9v   30m   8Mi   
+===== 22:28:17 STEP 5 — increase load: load generator scaled to 6 workers
+----- 22:28:30
+hpa-demo   Deployment/hpa-demo   cpu: 32%/50%   1     5     1     4m31s
+hpa-demo-5d6676989b-r2z9v   32m   8Mi   
+----- 22:28:46
+hpa-demo   Deployment/hpa-demo   cpu: 32%/50%   1     5     1     4m46s
+hpa-demo-5d6676989b-r2z9v   32m   8Mi   
+----- 22:29:01
+hpa-demo   Deployment/hpa-demo   cpu: 32%/50%   1     5     1     5m2s
+hpa-demo-5d6676989b-r2z9v   32m   8Mi   
+----- 22:29:17
+hpa-demo   Deployment/hpa-demo   cpu: 32%/50%   1     5     1     5m23s
+hpa-demo-5d6676989b-r2z9v   32m   8Mi   
+----- 22:29:42
+hpa-demo   Deployment/hpa-demo   cpu: 69%/50%   1     5     1     5m47s
+hpa-demo-5d6676989b-r2z9v   69m   7Mi   
+----- 22:30:15
+hpa-demo   Deployment/hpa-demo   cpu: 69%/50%   1     5     2     6m16s
+hpa-demo-5d6676989b-r2z9v   69m   7Mi   
+----- 22:30:31
+hpa-demo   Deployment/hpa-demo   cpu: 44%/50%   1     5     2     6m31s
+hpa-demo-5d6676989b-9j6dd   83m   11Mi   
+hpa-demo-5d6676989b-r2z9v   44m   7Mi    
+----- 22:30:47
+hpa-demo   Deployment/hpa-demo   cpu: 44%/50%   1     5     2     6m47s
+hpa-demo-5d6676989b-9j6dd   83m   11Mi   
+hpa-demo-5d6676989b-r2z9v   44m   7Mi    
+----- 22:31:02
+hpa-demo   Deployment/hpa-demo   cpu: 44%/50%   1     5     2     7m3s
+hpa-demo-5d6676989b-9j6dd   83m   11Mi   
+hpa-demo-5d6676989b-r2z9v   44m   7Mi    
+----- 22:31:18
+hpa-demo   Deployment/hpa-demo   cpu: 44%/50%   1     5     2     7m18s
+hpa-demo-5d6676989b-9j6dd   83m   11Mi   
+hpa-demo-5d6676989b-r2z9v   44m   7Mi    
+----- 22:31:33
+hpa-demo   Deployment/hpa-demo   cpu: 53%/50%   1     5     2     7m34s
+hpa-demo-5d6676989b-9j6dd   57m   12Mi   
+hpa-demo-5d6676989b-r2z9v   49m   8Mi    
+----- 22:31:49
+hpa-demo   Deployment/hpa-demo   cpu: 53%/50%   1     5     2     7m49s
+hpa-demo-5d6676989b-9j6dd   57m   12Mi   
+hpa-demo-5d6676989b-r2z9v   49m   8Mi    
+----- 22:32:05
+hpa-demo   Deployment/hpa-demo   cpu: 53%/50%   1     5     2     8m5s
+hpa-demo-5d6676989b-9j6dd   57m   12Mi   
+hpa-demo-5d6676989b-r2z9v   49m   8Mi    
+----- 22:32:20
+hpa-demo   Deployment/hpa-demo   cpu: 53%/50%   1     5     2     8m24s
+hpa-demo-5d6676989b-9j6dd   57m   12Mi   
+hpa-demo-5d6676989b-r2z9v   49m   8Mi    
+----- 22:32:41
+hpa-demo   Deployment/hpa-demo   cpu: 53%/50%   1     5     2     8m42s
+hpa-demo-5d6676989b-9j6dd   55m   7Mi   
+hpa-demo-5d6676989b-r2z9v   50m   7Mi   
+----- 22:33:00
+hpa-demo   Deployment/hpa-demo   cpu: 52%/50%   1     5     2     9m1s
+hpa-demo-5d6676989b-9j6dd   55m   7Mi   
+hpa-demo-5d6676989b-r2z9v   50m   7Mi   
+===== 22:33:05 load generator deleted
+----- 22:33:17
+hpa-demo   Deployment/hpa-demo   cpu: 52%/50%   1     5     2     9m22s
+hpa-demo-5d6676989b-9j6dd   55m   7Mi   
+hpa-demo-5d6676989b-r2z9v   50m   7Mi   
+----- 22:33:38
+error: Get "https://127.0.0.1:59830/apis/autoscaling/v2/namespaces/default/horizontalpodautoscalers/hpa-demo": net/http: TLS handshake timeout - error from a previous attempt: http2: client connection lost
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 22:35:02
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 22:35:44
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 22:36:21
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 22:36:57
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 22:37:33
+Unable to connect to the server: net/http: TLS handshake timeout
+error: Metrics API not available
+----- 22:38:31
+hpa-demo   Deployment/hpa-demo   cpu: 52%/50%   1     5     2     14m
+error: Metrics API not available
+----- 22:39:17
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     15m
+error: Metrics API not available
+----- 22:40:00
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     16m
+error: Metrics API not available
+----- 22:40:21
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     16m
+error: Metrics API not available
+----- 22:40:55
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     16m
+error: Metrics API not available
+----- 22:41:14
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     17m
+error: Metrics API not available
+----- 22:41:37
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     17m
+error: Metrics API not available
+----- 22:41:54
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     17m
+error: Metrics API not available
+----- 22:42:10
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     18m
+error: Metrics API not available
+----- 22:42:26
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     18m
+error: Metrics API not available
+----- 22:42:41
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     18m
+error: Metrics API not available
+----- 22:42:56
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     18m
+error: Metrics API not available
+----- 22:43:12
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     19m
+error: Metrics API not available
+----- 22:43:28
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     19m
+error: Metrics API not available
+----- 22:43:44
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     19m
+error: Metrics API not available
+----- 22:43:59
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     19m
+error: Metrics API not available
+----- 22:44:14
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     20m
+error: Metrics API not available
+----- 22:44:30
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     20m
+error: Metrics API not available
+----- 22:44:45
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     20m
+error: Metrics API not available
+----- 22:45:01
+hpa-demo   Deployment/hpa-demo   cpu: <unknown>/50%   1     5     2     21m
+error: Metrics API not available
+----- 22:45:16
+hpa-demo   Deployment/hpa-demo   cpu: 0%/50%   1     5     2     21m
+hpa-demo-5d6676989b-r2z9v   0m    7Mi   
+----- 22:45:31
+hpa-demo   Deployment/hpa-demo   cpu: 0%/50%   1     5     1     21m
+hpa-demo-5d6676989b-r2z9v   0m    7Mi   
+----- 22:45:50
+hpa-demo   Deployment/hpa-demo   cpu: 0%/50%   1     5     1     22m

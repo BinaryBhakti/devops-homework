@@ -1,0 +1,96 @@
+########## TASK 2 — HPA timeline: kubectl get hpa + kubectl top pods every 15 s ##########
+
+# columns: NAME REFERENCE TARGETS MINPODS MAXPODS REPLICAS AGE / POD CPU MEMORY
+===== 21:56:48 load generator: 1 worker
+----- 21:56:50
+hpa-demo   Deployment/hpa-demo   cpu: 0%/50%   1     5     1     2m21s
+hpa-demo-5d6676989b-665ch   0m    18Mi   
+----- 21:57:06
+hpa-demo   Deployment/hpa-demo   cpu: 0%/50%   1     5     1     2m39s
+hpa-demo-5d6676989b-665ch   0m    18Mi   
+----- 21:57:28
+hpa-demo   Deployment/hpa-demo   cpu: 0%/50%   1     5     1     2m57s
+hpa-demo-5d6676989b-665ch   0m    18Mi   
+----- 21:57:44
+hpa-demo   Deployment/hpa-demo   cpu: 25%/50%   1     5     1     3m16s
+hpa-demo-5d6676989b-665ch   25m   19Mi   
+----- 21:58:00
+hpa-demo   Deployment/hpa-demo   cpu: 25%/50%   1     5     1     3m32s
+hpa-demo-5d6676989b-665ch   25m   19Mi   
+----- 21:58:17
+hpa-demo   Deployment/hpa-demo   cpu: 25%/50%   1     5     1     3m49s
+hpa-demo-5d6676989b-665ch   25m   19Mi   
+----- 21:58:33
+hpa-demo   Deployment/hpa-demo   cpu: 25%/50%   1     5     1     4m4s
+hpa-demo-5d6676989b-665ch   66m   20Mi   
+----- 21:58:48
+hpa-demo   Deployment/hpa-demo   cpu: 66%/50%   1     5     1     4m20s
+hpa-demo-5d6676989b-665ch   66m   20Mi   
+----- 21:59:06
+hpa-demo   Deployment/hpa-demo   cpu: 66%/50%   1     5     2     4m36s
+hpa-demo-5d6676989b-665ch   66m   20Mi   
+----- 21:59:23
+hpa-demo   Deployment/hpa-demo   cpu: 66%/50%   1     5     2     4m54s
+hpa-demo-5d6676989b-665ch   66m   20Mi   
+===== 21:59:24 STEP 5 — increase load: load generator scaled to 4 workers
+----- 21:59:38
+hpa-demo   Deployment/hpa-demo   cpu: 66%/50%   1     5     2     5m10s
+hpa-demo-5d6676989b-665ch   66m   19Mi   
+----- 21:59:58
+hpa-demo   Deployment/hpa-demo   cpu: 66%/50%   1     5     2     5m30s
+hpa-demo-5d6676989b-665ch   66m   19Mi   
+----- 22:00:20
+hpa-demo   Deployment/hpa-demo   cpu: 66%/50%   1     5     2     5m46s
+hpa-demo-5d6676989b-665ch   66m   19Mi   
+----- 22:07:40
+hpa-demo   Deployment/hpa-demo   cpu: 66%/50%   1     5     2     6m12s
+hpa-demo-5d6676989b-665ch   66m   19Mi   
+----- 22:08:06
+hpa-demo   Deployment/hpa-demo   cpu: 51%/50%   1     5     2     13m
+hpa-demo-5d6676989b-665ch   62m   18Mi   
+hpa-demo-5d6676989b-wltzz   41m   8Mi    
+----- 22:08:25
+hpa-demo   Deployment/hpa-demo   cpu: 51%/50%   1     5     2     13m
+hpa-demo-5d6676989b-665ch   62m   18Mi   
+hpa-demo-5d6676989b-wltzz   41m   8Mi    
+----- 22:08:44
+hpa-demo   Deployment/hpa-demo   cpu: 51%/50%   1     5     2     14m
+hpa-demo-5d6676989b-665ch   3m    18Mi   
+----- 22:09:13
+E1007 22:10:01.920220   89046 request.go:1196] "Unexpected error when reading response body" err="http2: client connection lost"
+error: unexpected error when reading response body. Please retry. Original error: http2: client connection lost
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 22:10:28
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 22:11:08
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 22:11:46
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+===== 22:12:13 load generator deleted
+----- 22:12:21
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 22:12:57
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 22:13:33
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 22:14:09
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 22:14:45
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 22:15:21
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 22:15:57
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 22:16:33
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
