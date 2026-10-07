@@ -1,0 +1,135 @@
+########## TASK 15 — Ingress vs Ingress Controller, shown rather than described ##########
+
+# Part A — the two halves are different kinds of object
+$ kubectl api-resources --api-group=networking.k8s.io | grep -i ingress
+ingressclasses                 networking.k8s.io/v1   false        IngressClass
+ingresses         ing          networking.k8s.io/v1   true         Ingress
+
+$ kubectl get ingressclass -o wide
+NAME              CONTROLLER             PARAMETERS   AGE
+nginx (default)   k8s.io/ingress-nginx   <none>       19d
+
+$ kubectl get ingressclass nginx -o jsonpath='controller: {.spec.controller}{"\n"}default:    {.metadata.annotations.ingressclass\.kubernetes\.io/is-default-class}{"\n"}'
+controller: k8s.io/ingress-nginx
+default:    true
+
+$ kubectl get deploy,svc -n ingress-nginx
+NAME                                       READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/ingress-nginx-controller   1/1     1            1           19d
+
+NAME                                         TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)                      AGE
+service/ingress-nginx-controller             NodePort    10.105.42.197   <none>        80:30160/TCP,443:30381/TCP   19d
+service/ingress-nginx-controller-admission   ClusterIP   10.97.188.175   <none>        443/TCP                      19d
+
+$ kubectl get deploy -n ingress-nginx ingress-nginx-controller -o jsonpath='{range .spec.template.spec.containers[0].args[*]}{@}{"\n"}{end}' | head -4
+/nginx-ingress-controller
+--election-id=ingress-nginx-leader
+--controller-class=k8s.io/ingress-nginx
+--watch-ingress-without-class=true
+
+# Part B — two backends, plus a curl pod to test from inside the cluster
+$ kubectl apply -f apps.yaml
+deployment.apps/shop created
+service/shop created
+deployment.apps/blog created
+service/blog created
+
+$ kubectl run curl --image=curlimages/curl:8.11.1 --restart=Never -- sleep 3600
+pod/curl created
+
+$ kubectl wait --for=condition=Available deploy/shop deploy/blog --timeout=120s && kubectl wait --for=condition=Ready pod/curl --timeout=120s
+deployment.apps/shop condition met
+deployment.apps/blog condition met
+pod/curl condition met
+
+# Part C — an Ingress that the nginx controller claims
+$ kubectl apply -f ingress-nginx-class.yaml
+ingress.networking.k8s.io/demo created
+
+$ kubectl wait ingress/demo --for=jsonpath={.status.loadBalancer.ingress[0].ip} --timeout=90s; kubectl get ingress demo
+ingress.networking.k8s.io/demo condition met
+NAME   CLASS   HOSTS                             ADDRESS        PORTS   AGE
+demo   nginx   shop.demo.local,blog.demo.local   192.168.49.2   80      35s
+
+$ kubectl exec curl -- curl -s -m 5 -w " [HTTP %{http_code}]\n" -H 'Host: shop.demo.local' http://ingress-nginx-controller.ingress-nginx.svc
+hello from SHOP
+ [HTTP 200]
+
+$ kubectl exec curl -- curl -s -m 5 -w " [HTTP %{http_code}]\n" -H 'Host: blog.demo.local' http://ingress-nginx-controller.ingress-nginx.svc
+hello from BLOG
+ [HTTP 200]
+
+$ kubectl exec curl -- curl -s -m 5 -w " [HTTP %{http_code}]\n" -H 'Host: unknown.demo.local' http://ingress-nginx-controller.ingress-nginx.svc | tail -2
+</html>
+ [HTTP 404]
+
+# what the controller did with the YAML: it wrote real nginx server blocks
+$ kubectl exec -n ingress-nginx deploy/ingress-nginx-controller -- grep -n 'server_name .*demo.local' /etc/nginx/nginx.conf
+337:		server_name "blog.demo.local" ;
+452:		server_name "shop.demo.local" ;
+
+$ kubectl logs -n ingress-nginx deploy/ingress-nginx-controller --since=3m | grep -E 'name="demo"|ingress="demo"|Backend successfully reloaded' | sed -E 's/UID:"[^"]*", //' | cut -c1-190 | tail -4
+I1007 15:54:27.048763       7 controller.go:231] "Backend successfully reloaded"
+I1007 15:54:39.238806       7 controller.go:231] "Backend successfully reloaded"
+I1007 15:56:05.895514       7 controller.go:231] "Backend successfully reloaded"
+I1007 15:56:35.985366       7 status.go:311] "updating Ingress status" namespace="default" ingress="demo" currentValue=null newValue=[{"ip":"192.168.49.2"}]
+
+# Part D — a valid Ingress that no installed controller claims
+$ kubectl apply -f ingress-no-controller.yaml
+ingress.networking.k8s.io/orphan created
+
+$ kubectl get ingress
+NAME     CLASS     HOSTS                             ADDRESS        PORTS   AGE
+demo     nginx     shop.demo.local,blog.demo.local   192.168.49.2   80      43s
+orphan   traefik   orphan.demo.local                                80      0s
+
+$ kubectl describe ingress orphan | grep -E 'Ingress Class|Address|Events'
+Address:          
+Ingress Class:    traefik
+Events:              <none>
+
+$ kubectl exec curl -- curl -s -m 5 -w " [HTTP %{http_code}]\n" -H 'Host: orphan.demo.local' http://ingress-nginx-controller.ingress-nginx.svc | tail -2
+</html>
+ [HTTP 404]
+
+$ kubectl exec -n ingress-nginx deploy/ingress-nginx-controller -- grep -c 'orphan.demo.local' /etc/nginx/nginx.conf
+0
+command terminated with exit code 1
+
+# stored in etcd, accepted by the API, and routes nothing: no ADDRESS, no events, absent from nginx.conf
+# Part E — keep the Ingress, take the controller away
+$ kubectl scale deploy -n ingress-nginx ingress-nginx-controller --replicas=0 && kubectl rollout status deploy -n ingress-nginx ingress-nginx-controller --timeout=120s
+deployment.apps/ingress-nginx-controller scaled
+Waiting for deployment spec update to be observed...
+deployment "ingress-nginx-controller" successfully rolled out
+
+$ kubectl get ingress demo
+NAME   CLASS   HOSTS                             ADDRESS        PORTS   AGE
+demo   nginx   shop.demo.local,blog.demo.local   192.168.49.2   80      51s
+
+$ kubectl get endpoints -n ingress-nginx ingress-nginx-controller
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+NAME                       ENDPOINTS   AGE
+ingress-nginx-controller   <none>      19d
+
+$ kubectl exec curl -- curl -s -m 5 -w " [HTTP %{http_code}]\n" -H 'Host: shop.demo.local' http://ingress-nginx-controller.ingress-nginx.svc; echo "curl exit code: $?"
+ [HTTP 000]
+command terminated with exit code 7
+curl exit code: 7
+
+# the routing rules are all still there — there is just nothing executing them
+$ kubectl scale deploy -n ingress-nginx ingress-nginx-controller --replicas=1 && kubectl rollout status deploy -n ingress-nginx ingress-nginx-controller --timeout=240s
+deployment.apps/ingress-nginx-controller scaled
+Waiting for deployment "ingress-nginx-controller" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "ingress-nginx-controller" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "ingress-nginx-controller" rollout to finish: 0 of 1 updated replicas are available...
+deployment "ingress-nginx-controller" successfully rolled out
+
+$ kubectl exec curl -- curl -s -m 5 -w " [HTTP %{http_code}]\n" -H 'Host: shop.demo.local' http://ingress-nginx-controller.ingress-nginx.svc
+hello from SHOP
+ [HTTP 200]
+
+$ kubectl exec curl -- curl -s -m 5 -w " [HTTP %{http_code}]\n" -H 'Host: blog.demo.local' http://ingress-nginx-controller.ingress-nginx.svc
+hello from BLOG
+ [HTTP 200]
+

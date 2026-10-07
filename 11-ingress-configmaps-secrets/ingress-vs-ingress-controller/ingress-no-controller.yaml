@@ -1,0 +1,15 @@
+# Valid Ingress, but it asks for class "traefik" — and no Traefik controller is installed.
+# The API server stores it; nothing ever routes it.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: orphan
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: orphan.demo.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: shop, port: { number: 80 } } }

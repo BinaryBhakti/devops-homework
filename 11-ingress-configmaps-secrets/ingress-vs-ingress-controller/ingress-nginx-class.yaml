@@ -1,0 +1,20 @@
+# Claimed by the controller that owns IngressClass "nginx" (ingress-nginx).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: demo
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: shop.demo.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: shop, port: { number: 80 } } }
+    - host: blog.demo.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: blog, port: { number: 80 } } }
