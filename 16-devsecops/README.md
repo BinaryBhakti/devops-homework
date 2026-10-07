@@ -473,11 +473,12 @@ limited to `main`. To see the gate fail in GitHub Actions:
 
 ```bash
 git switch -c hw16-gate-demo
-sed -i '' 's/^Flask==3.1.3$/Flask==2.2.0/' 16-devsecops/requirements.txt   # GNU sed: -i without ''
-git commit -am "Demo: pin a vulnerable Flask to show the security gate blocking"
+printf 'Flask==2.2.0\nWerkzeug==2.2.2\ngunicorn==26.2.0\n' > 16-devsecops/requirements.txt
+# Flask alone is not enough: it would pull Werkzeug 3.x and break the build at job 1 (run #3 below)
+git commit -am "Demo: pin a vulnerable Flask + Werkzeug to show the security gate blocking"
 git push -u origin hw16-gate-demo
 # Actions → "HW16 DevSecOps": stages 1-7 green, "8 · Security Gate" red,
-# "9 · Push Image" and "10 · Deploy" skipped. Delete the branch afterwards.
+# "9 · Push Image" and "10 · Deploy" skipped. This was done for real: see below.
 ```
 
 Use the dependency demo on GitHub, not the token demo. A token committed to a branch stays in
@@ -505,6 +506,36 @@ graph on the run page is a straight line. The artifacts are the security evidenc
 leaves behind: `sast-reports`, `sca-reports`, `secret-scan-report`, `image-scan-report` and
 `unit-test-results`, plus the `image` tarball. The gate reads the reports; it does not
 re-run the scanners.
+
+### The gate blocking, on GitHub
+
+The local demonstration (Task 4) was repeated on GitHub on a throwaway branch,
+[`hw16-gate-demo`](https://github.com/BinaryBhakti/devops-homework/tree/hw16-gate-demo), which
+pins vulnerable dependencies and is never merged.
+
+| Run | Change | Result | Link |
+|---|---|---|---|
+| #3 | `Flask==2.2.0` (the one-line change suggested in Task 4) | **failed at 1 · Build**, so the gate never ran | [run 37690276630](https://github.com/BinaryBhakti/devops-homework/actions/runs/37690276630) |
+| #4 | `Flask==2.2.0` + `Werkzeug==2.2.2` | **jobs 1–7 green, 8 · Security Gate red, Push and Deploy skipped** | [run 37690710543](https://github.com/BinaryBhakti/devops-homework/actions/runs/37690710543) |
+
+![run #4: everything builds, tests and scans, and the Security Gate refuses the release; Push and Deploy are skipped](screenshots/github-run-4-gate-blocks.png)
+*run #4: everything builds, tests and scans, and the Security Gate refuses the release; Push and Deploy are skipped*
+
+That is the whole point of a gate. The scanners in jobs 3–7 *report* findings and pass. Job 8
+reads all their reports, applies [`security/gate-policy.json`](security/gate-policy.json),
+and is the only job allowed to fail the pipeline. Because Push `needs:` the gate, a vulnerable
+image never reaches the registry, let alone the cluster.
+
+**Why run #3 failed earlier than expected.** Pinning only `Flask==2.2.0` lets pip resolve the
+newest Werkzeug (3.x), which removed APIs that Flask 2.2 imports. The app could not even be
+imported, so job 1 failed before any scanner ran. Locally the scanners only *read*
+`requirements.txt`; on GitHub job 1 actually installs it. The demonstration needs a
+*consistent* vulnerable set, so run #4 pins the Werkzeug that Flask 2.2.0 shipped with. This is
+also a real-world lesson: an unpinned transitive dependency can break a build just as surely
+as a vulnerable one.
+
+![run #3: the Flask-only pin broke the Build job before the gate could decide](screenshots/github-run-3-fails-at-build.png)
+*run #3: the Flask-only pin broke the Build job before the gate could decide*
 
 It passed first time because every finding was fixed locally before pushing (see the scans
 above). Before the fixes, the course code fails the gate on Bandit B201 HIGH, two Semgrep
