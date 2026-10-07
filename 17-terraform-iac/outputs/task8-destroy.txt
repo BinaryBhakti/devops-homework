@@ -1,0 +1,223 @@
+########## TASK 8 — terraform destroy ##########
+
+$ terraform plan -destroy -no-color | tail -12
+        # (13 unchanged attributes hidden)
+    }
+
+Plan: 0 to add, 0 to change, 6 to destroy.
+
+Changes to Outputs:
+  - bucket_arn        = "arn:aws:s3:::binarybhakti-session18-demo" -> null
+  - bucket_name       = "binarybhakti-session18-demo" -> null
+  - bucket_region     = "ap-south-1" -> null
+  - object_url        = "http://localhost:4566/binarybhakti-session18-demo/docs/hello.txt" -> null
+  - object_version_id = "AaEXDD1VOY102oDB40euBc4Fu5Qhb7Ao" -> null
+  - versioning_status = "Enabled" -> null
+
+$ terraform destroy -no-color -auto-approve
+aws_s3_bucket.demo: Refreshing state... [id=binarybhakti-session18-demo]
+aws_s3_bucket_public_access_block.demo: Refreshing state... [id=binarybhakti-session18-demo]
+aws_s3_bucket_server_side_encryption_configuration.demo: Refreshing state... [id=binarybhakti-session18-demo]
+aws_s3_bucket_versioning.demo: Refreshing state... [id=binarybhakti-session18-demo]
+aws_s3_object.readme: Refreshing state... [id=binarybhakti-session18-demo/docs/hello.txt]
+aws_s3_bucket_lifecycle_configuration.demo: Refreshing state... [id=binarybhakti-session18-demo]
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  - destroy
+
+Terraform will perform the following actions:
+
+  # aws_s3_bucket.demo will be destroyed
+  - resource "aws_s3_bucket" "demo" {
+      - arn                         = "arn:aws:s3:::binarybhakti-session18-demo" -> null
+      - bucket                      = "binarybhakti-session18-demo" -> null
+      - bucket_domain_name          = "binarybhakti-session18-demo.s3.amazonaws.com" -> null
+      - bucket_namespace            = "global" -> null
+      - bucket_region               = "ap-south-1" -> null
+      - bucket_regional_domain_name = "binarybhakti-session18-demo.s3.ap-south-1.amazonaws.com" -> null
+      - force_destroy               = true -> null
+      - hosted_zone_id              = "Z11RGJOFQNVJUP" -> null
+      - id                          = "binarybhakti-session18-demo" -> null
+      - object_lock_enabled         = false -> null
+      - region                      = "ap-south-1" -> null
+      - request_payer               = "BucketOwner" -> null
+      - tags                        = {
+          - "Environment" = "dev"
+          - "ManagedBy"   = "Terraform"
+          - "Name"        = "binarybhakti-session18-demo"
+          - "Project"     = "Session18"
+        } -> null
+      - tags_all                    = {
+          - "Environment" = "dev"
+          - "ManagedBy"   = "Terraform"
+          - "Name"        = "binarybhakti-session18-demo"
+          - "Project"     = "Session18"
+        } -> null
+        # (3 unchanged attributes hidden)
+
+      - grant {
+          - id          = "75aa57f09aa0c8caeab4f8c24e99d10f8e7faeebf76c078efc7c6caea54ba06a" -> null
+          - permissions = [
+              - "FULL_CONTROL",
+            ] -> null
+          - type        = "CanonicalUser" -> null
+            # (1 unchanged attribute hidden)
+        }
+
+      - lifecycle_rule {
+          - abort_incomplete_multipart_upload_days = 0 -> null
+          - enabled                                = true -> null
+          - id                                     = "expire-old-versions" -> null
+          - tags                                   = {} -> null
+            # (1 unchanged attribute hidden)
+
+          - noncurrent_version_expiration {
+              - days = 30 -> null
+            }
+        }
+
+      - server_side_encryption_configuration {
+          - rule {
+              - bucket_key_enabled = false -> null
+
+              - apply_server_side_encryption_by_default {
+                  - sse_algorithm     = "AES256" -> null
+                    # (1 unchanged attribute hidden)
+                }
+            }
+        }
+
+      - versioning {
+          - enabled    = true -> null
+          - mfa_delete = false -> null
+        }
+    }
+
+  # aws_s3_bucket_lifecycle_configuration.demo will be destroyed
+  - resource "aws_s3_bucket_lifecycle_configuration" "demo" {
+      - bucket                                 = "binarybhakti-session18-demo" -> null
+      - id                                     = "binarybhakti-session18-demo" -> null
+      - region                                 = "ap-south-1" -> null
+      - transition_default_minimum_object_size = "all_storage_classes_128K" -> null
+        # (1 unchanged attribute hidden)
+
+      - rule {
+          - id     = "expire-old-versions" -> null
+          - status = "Enabled" -> null
+            # (1 unchanged attribute hidden)
+
+          - filter {
+                # (1 unchanged attribute hidden)
+            }
+
+          - noncurrent_version_expiration {
+              - noncurrent_days = 30 -> null
+            }
+        }
+    }
+
+  # aws_s3_bucket_public_access_block.demo will be destroyed
+  - resource "aws_s3_bucket_public_access_block" "demo" {
+      - block_public_acls       = true -> null
+      - block_public_policy     = true -> null
+      - bucket                  = "binarybhakti-session18-demo" -> null
+      - id                      = "binarybhakti-session18-demo" -> null
+      - ignore_public_acls      = true -> null
+      - region                  = "ap-south-1" -> null
+      - restrict_public_buckets = true -> null
+    }
+
+  # aws_s3_bucket_server_side_encryption_configuration.demo will be destroyed
+  - resource "aws_s3_bucket_server_side_encryption_configuration" "demo" {
+      - bucket                = "binarybhakti-session18-demo" -> null
+      - id                    = "binarybhakti-session18-demo" -> null
+      - region                = "ap-south-1" -> null
+        # (1 unchanged attribute hidden)
+
+      - rule {
+          - blocked_encryption_types = [] -> null
+          - bucket_key_enabled       = false -> null
+
+          - apply_server_side_encryption_by_default {
+              - sse_algorithm     = "AES256" -> null
+                # (1 unchanged attribute hidden)
+            }
+        }
+    }
+
+  # aws_s3_bucket_versioning.demo will be destroyed
+  - resource "aws_s3_bucket_versioning" "demo" {
+      - bucket                = "binarybhakti-session18-demo" -> null
+      - id                    = "binarybhakti-session18-demo" -> null
+      - region                = "ap-south-1" -> null
+        # (1 unchanged attribute hidden)
+
+      - versioning_configuration {
+          - mfa_delete = "Disabled" -> null
+          - status     = "Enabled" -> null
+        }
+    }
+
+  # aws_s3_object.readme will be destroyed
+  - resource "aws_s3_object" "readme" {
+      - arn                           = "arn:aws:s3:::binarybhakti-session18-demo/docs/hello.txt" -> null
+      - bucket                        = "binarybhakti-session18-demo" -> null
+      - bucket_key_enabled            = false -> null
+      - content                       = <<-EOT
+            Hello from Terraform - Session 18 (dev)
+        EOT -> null
+      - content_type                  = "text/plain" -> null
+      - etag                          = "b4222fd50d92030a2632c1cdbad0677d" -> null
+      - force_destroy                 = false -> null
+      - id                            = "binarybhakti-session18-demo/docs/hello.txt" -> null
+      - key                           = "docs/hello.txt" -> null
+      - metadata                      = {} -> null
+      - region                        = "ap-south-1" -> null
+      - server_side_encryption        = "AES256" -> null
+      - storage_class                 = "STANDARD" -> null
+      - tags                          = {} -> null
+      - tags_all                      = {} -> null
+      - version_id                    = "AaEXDD1VOY102oDB40euBc4Fu5Qhb7Ao" -> null
+        # (13 unchanged attributes hidden)
+    }
+
+Plan: 0 to add, 0 to change, 6 to destroy.
+
+Changes to Outputs:
+  - bucket_arn        = "arn:aws:s3:::binarybhakti-session18-demo" -> null
+  - bucket_name       = "binarybhakti-session18-demo" -> null
+  - bucket_region     = "ap-south-1" -> null
+  - object_url        = "http://localhost:4566/binarybhakti-session18-demo/docs/hello.txt" -> null
+  - object_version_id = "AaEXDD1VOY102oDB40euBc4Fu5Qhb7Ao" -> null
+  - versioning_status = "Enabled" -> null
+aws_s3_bucket_public_access_block.demo: Destroying... [id=binarybhakti-session18-demo]
+aws_s3_object.readme: Destroying... [id=binarybhakti-session18-demo/docs/hello.txt]
+aws_s3_bucket_lifecycle_configuration.demo: Destroying... [id=binarybhakti-session18-demo]
+aws_s3_bucket_lifecycle_configuration.demo: Destruction complete after 1s
+aws_s3_bucket_public_access_block.demo: Destruction complete after 1s
+aws_s3_object.readme: Destruction complete after 1s
+aws_s3_bucket_versioning.demo: Destroying... [id=binarybhakti-session18-demo]
+aws_s3_bucket_server_side_encryption_configuration.demo: Destroying... [id=binarybhakti-session18-demo]
+aws_s3_bucket_server_side_encryption_configuration.demo: Destruction complete after 0s
+aws_s3_bucket_versioning.demo: Destruction complete after 0s
+aws_s3_bucket.demo: Destroying... [id=binarybhakti-session18-demo]
+aws_s3_bucket.demo: Destruction complete after 0s
+
+Destroy complete! Resources: 6 destroyed.
+
+# verify from the S3 API that the bucket is gone, and from Terraform that nothing is tracked
+$ awslocal s3 ls; echo "(exit $?, bucket list is empty)"
+(exit 0, bucket list is empty)
+
+$ awslocal s3api head-bucket --bucket binarybhakti-session18-demo; echo "exit code: $?"
+
+An error occurred (404) when calling the HeadBucket operation: Not Found
+exit code: 255
+
+$ terraform state list; echo "(exit $?, state is empty)"
+(exit 0, state is empty)
+
+$ terraform show -no-color
+The state file is empty. No resources are represented.
+

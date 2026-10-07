@@ -1,0 +1,31 @@
+########## TASK 7 — terraform output ##########
+
+$ terraform output -no-color
+bucket_arn = "arn:aws:s3:::binarybhakti-session18-demo"
+bucket_name = "binarybhakti-session18-demo"
+bucket_region = "ap-south-1"
+object_url = "http://localhost:4566/binarybhakti-session18-demo/docs/hello.txt"
+object_version_id = "AaEXDD1VOY102oDB40euBc4Fu5Qhb7Ao"
+versioning_status = "Enabled"
+
+$ terraform output -raw bucket_name; echo
+binarybhakti-session18-demo
+
+$ terraform output -json | python3 -m json.tool | head -12
+{
+    "bucket_arn": {
+        "sensitive": false,
+        "type": "string",
+        "value": "arn:aws:s3:::binarybhakti-session18-demo"
+    },
+    "bucket_name": {
+        "sensitive": false,
+        "type": "string",
+        "value": "binarybhakti-session18-demo"
+    },
+    "bucket_region": {
+
+# outputs are for consumption by scripts — fetch the object through the URL Terraform reported
+$ curl -s "$(terraform output -raw object_url)"
+Hello from Terraform - Session 18 (dev)
+

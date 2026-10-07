@@ -1,0 +1,44 @@
+########## TASK 1 — terraform init ##########
+
+$ ls -1
+main.tf
+outputs.tf
+provider.tf
+terraform.tfvars
+variables.tf
+
+$ terraform init -no-color
+Initializing the backend...
+
+Initializing provider plugins...
+- Finding hashicorp/aws versions matching "~> 6.0"...
+- Installing hashicorp/aws v6.67.0...
+- Installed hashicorp/aws v6.67.0 (signed by HashiCorp)
+
+Terraform has created a lock file .terraform.lock.hcl to record the provider
+selections it made above. Include this file in your version control repository
+so that Terraform can guarantee to make the same selections by default when
+you run "terraform init" in the future.
+
+Terraform has been successfully initialized!
+
+$ ls -a; cat .terraform.lock.hcl | head -8
+.
+..
+.gitignore
+.terraform
+.terraform.lock.hcl
+main.tf
+outputs.tf
+provider.tf
+terraform.tfvars
+variables.tf
+# This file is maintained automatically by "terraform init".
+# Manual edits may be lost in future updates.
+
+provider "registry.terraform.io/hashicorp/aws" {
+  version     = "6.67.0"
+  constraints = "~> 6.0"
+  hashes = [
+    "h1:OgdIUAQDtJBxlKjoPgChD1w57vl6hm6PyJHiBYgsgQA=",
+

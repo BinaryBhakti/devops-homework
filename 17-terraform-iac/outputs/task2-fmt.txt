@@ -1,0 +1,51 @@
+########## TASK 2 — terraform fmt ##########
+
+$ terraform fmt -check -recursive; echo "exit code: $?"
+exit code: 0
+
+# the files were already canonical, so mis-format two lines on purpose to see fmt do its job
+$ sed -i '' -e 's/^environment .*/environment="dev"/' terraform.tfvars && sed -i '' -e 's/^  force_destroy = true/      force_destroy=true/' main.tf
+
+$ terraform fmt -check -diff; echo "exit code: $?"
+main.tf
+--- old/main.tf
++++ new/main.tf
+@@ -9,7 +9,7 @@
+ 
+ resource "aws_s3_bucket" "demo" {
+   bucket        = var.bucket_name
+-      force_destroy=true # lets `terraform destroy` remove a non-empty, versioned bucket
++  force_destroy = true # lets `terraform destroy` remove a non-empty, versioned bucket
+   tags          = local.common_tags
+ }
+ 
+terraform.tfvars
+--- old/terraform.tfvars
++++ new/terraform.tfvars
+@@ -1,4 +1,4 @@
+ aws_region              = "ap-south-1"
+ bucket_name             = "binarybhakti-session18-demo"
+-environment="dev"
++environment             = "dev"
+ noncurrent_version_days = 30
+exit code: 3
+
+$ terraform fmt; echo "exit code: $?"
+main.tf
+terraform.tfvars
+exit code: 0
+
+$ cat terraform.tfvars; sed -n 10,14p main.tf
+aws_region              = "ap-south-1"
+bucket_name             = "binarybhakti-session18-demo"
+environment             = "dev"
+noncurrent_version_days = 30
+resource "aws_s3_bucket" "demo" {
+  bucket        = var.bucket_name
+  force_destroy = true # lets `terraform destroy` remove a non-empty, versioned bucket
+  tags          = local.common_tags
+}
+
+$ terraform fmt -check -recursive; echo "exit code: $?"
+exit code: 0
+

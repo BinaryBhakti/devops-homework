@@ -1,0 +1,130 @@
+########## TASK 5 — terraform apply ##########
+
+$ terraform apply -no-color s3.tfplan
+aws_s3_bucket.demo: Creating...
+aws_s3_bucket.demo: Creation complete after 2s [id=binarybhakti-session18-demo]
+aws_s3_bucket_versioning.demo: Creating...
+aws_s3_bucket_public_access_block.demo: Creating...
+aws_s3_bucket_server_side_encryption_configuration.demo: Creating...
+aws_s3_bucket_server_side_encryption_configuration.demo: Creation complete after 1s [id=binarybhakti-session18-demo]
+aws_s3_bucket_public_access_block.demo: Creation complete after 1s [id=binarybhakti-session18-demo]
+aws_s3_object.readme: Creating...
+aws_s3_object.readme: Creation complete after 0s [id=binarybhakti-session18-demo/docs/hello.txt]
+aws_s3_bucket_versioning.demo: Creation complete after 1s [id=binarybhakti-session18-demo]
+aws_s3_bucket_lifecycle_configuration.demo: Creating...
+aws_s3_bucket_lifecycle_configuration.demo: Still creating... [00m10s elapsed]
+aws_s3_bucket_lifecycle_configuration.demo: Still creating... [00m20s elapsed]
+aws_s3_bucket_lifecycle_configuration.demo: Still creating... [00m30s elapsed]
+aws_s3_bucket_lifecycle_configuration.demo: Still creating... [00m40s elapsed]
+aws_s3_bucket_lifecycle_configuration.demo: Still creating... [00m50s elapsed]
+aws_s3_bucket_lifecycle_configuration.demo: Still creating... [01m00s elapsed]
+aws_s3_bucket_lifecycle_configuration.demo: Creation complete after 1m2s [id=binarybhakti-session18-demo]
+
+Apply complete! Resources: 6 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+bucket_arn = "arn:aws:s3:::binarybhakti-session18-demo"
+bucket_name = "binarybhakti-session18-demo"
+bucket_region = "ap-south-1"
+object_url = "http://localhost:4566/binarybhakti-session18-demo/docs/hello.txt"
+object_version_id = "AaEXDD1VOY102oDB40euBc4Fu5Qhb7Ao"
+versioning_status = "Enabled"
+
+# verify against the (LocalStack) S3 API directly, not through Terraform
+$ awslocal s3 ls
+2026-10-07 21:17:42 binarybhakti-session18-demo
+
+$ awslocal s3api get-bucket-versioning --bucket binarybhakti-session18-demo
+{
+    "Status": "Enabled"
+}
+
+$ awslocal s3api get-bucket-encryption --bucket binarybhakti-session18-demo
+{
+    "ServerSideEncryptionConfiguration": {
+        "Rules": [
+            {
+                "ApplyServerSideEncryptionByDefault": {
+                    "SSEAlgorithm": "AES256"
+                },
+                "BucketKeyEnabled": false
+            }
+        ]
+    }
+}
+
+$ awslocal s3api get-public-access-block --bucket binarybhakti-session18-demo
+{
+    "PublicAccessBlockConfiguration": {
+        "BlockPublicAcls": true,
+        "IgnorePublicAcls": true,
+        "BlockPublicPolicy": true,
+        "RestrictPublicBuckets": true
+    }
+}
+
+$ awslocal s3api get-bucket-lifecycle-configuration --bucket binarybhakti-session18-demo
+{
+    "TransitionDefaultMinimumObjectSize": "all_storage_classes_128K",
+    "Rules": [
+        {
+            "ID": "expire-old-versions",
+            "Filter": {
+                "Prefix": ""
+            },
+            "Status": "Enabled",
+            "NoncurrentVersionExpiration": {
+                "NoncurrentDays": 30
+            }
+        }
+    ]
+}
+
+$ awslocal s3api get-bucket-tagging --bucket binarybhakti-session18-demo
+{
+    "TagSet": [
+        {
+            "Key": "Environment",
+            "Value": "dev"
+        },
+        {
+            "Key": "Name",
+            "Value": "binarybhakti-session18-demo"
+        },
+        {
+            "Key": "ManagedBy",
+            "Value": "Terraform"
+        },
+        {
+            "Key": "Project",
+            "Value": "Session18"
+        }
+    ]
+}
+
+$ awslocal s3 ls s3://binarybhakti-session18-demo --recursive
+2026-10-07 21:17:43         40 docs/hello.txt
+
+$ awslocal s3 cp s3://binarybhakti-session18-demo/docs/hello.txt -
+Hello from Terraform - Session 18 (dev)
+
+$ awslocal s3api head-object --bucket binarybhakti-session18-demo --key docs/hello.txt
+{
+    "AcceptRanges": "bytes",
+    "LastModified": "Wed, 07 Oct 2026 15:47:43 GMT",
+    "ContentLength": 40,
+    "ETag": "\"b4222fd50d92030a2632c1cdbad0677d\"",
+    "VersionId": "AaEXDD1VOY102oDB40euBc4Fu5Qhb7Ao",
+    "ContentType": "text/plain",
+    "ServerSideEncryption": "AES256",
+    "Metadata": {}
+}
+
+# idempotence: a second plan against unchanged config must find nothing to do
+$ terraform plan -no-color -detailed-exitcode | tail -3; echo "exit code: ${PIPESTATUS[0]}"
+
+Terraform has compared your real infrastructure against your configuration
+and found no differences, so no changes are needed.
+exit code: 0
+

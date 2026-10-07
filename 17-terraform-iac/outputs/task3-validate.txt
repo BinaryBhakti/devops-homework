@@ -1,0 +1,49 @@
+########## TASK 3 — terraform validate ##########
+
+$ terraform validate -no-color
+Success! The configuration is valid.
+
+
+# validate catches structural errors without touching the cloud — break a reference on a copy to prove it
+$ mkdir -p /tmp/tf-broken && cp *.tf /tmp/tf-broken/ && cp -r .terraform .terraform.lock.hcl /tmp/tf-broken/ && sed -i "" "s/aws_s3_bucket.demo.id/aws_s3_bucket.missing.id/" /tmp/tf-broken/main.tf && cd /tmp/tf-broken && terraform validate -no-color; echo "exit code: $?"
+
+Error: Reference to undeclared resource
+
+  on main.tf line 17, in resource "aws_s3_bucket_versioning" "demo":
+  17:   bucket = aws_s3_bucket.missing.id
+
+A managed resource "aws_s3_bucket" "missing" has not been declared in the
+root module.
+
+Error: Reference to undeclared resource
+
+  on main.tf line 25, in resource "aws_s3_bucket_server_side_encryption_configuration" "demo":
+  25:   bucket = aws_s3_bucket.missing.id
+
+A managed resource "aws_s3_bucket" "missing" has not been declared in the
+root module.
+
+Error: Reference to undeclared resource
+
+  on main.tf line 35, in resource "aws_s3_bucket_public_access_block" "demo":
+  35:   bucket = aws_s3_bucket.missing.id
+
+A managed resource "aws_s3_bucket" "missing" has not been declared in the
+root module.
+exit code: 1
+
+# variable validation rules run at plan time, against real input
+$ terraform plan -no-color -var="bucket_name=Bad_Bucket_Name" 2>&1 | head -12
+
+Planning failed. Terraform encountered an error while generating this plan.
+
+
+Error: Invalid value for variable
+
+  on variables.tf line 13:
+  13: variable "bucket_name" {
+    ├────────────────
+    │ var.bucket_name is "Bad_Bucket_Name"
+
+Bucket names must be 3-63 chars of lowercase letters, digits, dots and
+

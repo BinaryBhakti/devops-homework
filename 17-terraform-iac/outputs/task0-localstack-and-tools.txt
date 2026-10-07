@@ -1,0 +1,37 @@
+########## TASK 0 — tools and the LocalStack endpoint ##########
+
+$ terraform version
+Terraform v1.16.5
+on darwin_arm64
+
+$ aws --version
+aws-cli/1.44.87 Python/3.9.6 Darwin/25.5.0 botocore/1.42.97
+
+$ docker ps --filter name=localstack --format "{{.Names}}  {{.Image}}  {{.Status}}  {{.Ports}}"
+localstack  localstack/localstack:4.14.0  Up 5 minutes (healthy)  0.0.0.0:4566->4566/tcp, [::]:4566->4566/tcp
+
+$ curl -s localhost:4566/_localstack/info | python3 -m json.tool | grep -E "\"(version|edition|is_license_activated)\""
+    "version": "4.14.0:3d5a0c70e",
+    "edition": "community",
+    "is_license_activated": false,
+
+$ curl -s localhost:4566/_localstack/health | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[\"edition\"], d[\"version\"]); [print(f\"  {k:10} {v}\") for k,v in d[\"services\"].items() if v!=\"disabled\"]"
+community 4.14.0
+  dynamodb   available
+  dynamodbstreams available
+  ec2        available
+  iam        running
+  kinesis    available
+  s3         running
+  sts        running
+
+$ awslocal sts get-caller-identity
+{
+    "UserId": "AKIAIOSFODNN7EXAMPLE",
+    "Account": "000000000000",
+    "Arn": "arn:aws:iam::000000000000:root"
+}
+
+$ awslocal s3 ls; echo "(exit $?, no buckets yet)"
+(exit 0, no buckets yet)
+
