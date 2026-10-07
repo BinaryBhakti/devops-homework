@@ -184,10 +184,16 @@ jobs:
       - name: Push the exact image that was tested
         id: push
         working-directory: .
+        # The tags output is MULTI-LINE (sha tag + latest). Interpolating it straight into the
+        # script with ${{ }} split the `for` statement across two lines — a bash syntax error
+        # (exit code 2) on the first run. Passing it through env keeps it a single string, and
+        # is the recommended way to get any expression value into a script anyway.
+        env:
+          TAGS: ${{ needs.build.outputs.tags }}
         run: |
           docker load -i "${{ runner.temp }}/hw15-image.tar"
-          for t in ${{ needs.build.outputs.tags }}; do docker push "$t"; done
-          DIGEST=$(docker inspect --format '{{index .RepoDigests 0}}' "$(echo '${{ needs.build.outputs.tags }}' | head -1)" | cut -d@ -f2)
+          for t in $TAGS; do docker push "$t"; done
+          DIGEST=$(docker inspect --format '{{index .RepoDigests 0}}' "$(echo "$TAGS" | head -1)" | cut -d@ -f2)
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
           echo "### Pushed \`${{ env.IMAGE }}@$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
 
