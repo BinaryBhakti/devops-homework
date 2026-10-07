@@ -1,0 +1,10 @@
+# The image repository exists, the TAG does not (a typo: 1.277 instead of 1.27).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: imagepull-pod
+  labels: { tier: triage }
+spec:
+  containers:
+    - name: web
+      image: nginx:1.277

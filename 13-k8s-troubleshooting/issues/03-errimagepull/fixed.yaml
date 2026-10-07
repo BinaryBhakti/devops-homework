@@ -1,0 +1,12 @@
+# Fix: reference an image that exists in a registry the node can reach. For a real private
+# image this would be the full registry path plus an imagePullSecret.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: errimagepull-pod
+  labels: { tier: triage }
+spec:
+  containers:
+    - name: web-app
+      image: hashicorp/http-echo:1.0
+      args: ["-listen=:8080", "-text=yatri-api-service stand-in"]

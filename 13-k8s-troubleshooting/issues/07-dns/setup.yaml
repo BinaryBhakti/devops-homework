@@ -1,0 +1,29 @@
+# The API lives in namespace "backend"; its client lives in namespace "frontend".
+apiVersion: v1
+kind: Namespace
+metadata: { name: backend }
+---
+apiVersion: v1
+kind: Namespace
+metadata: { name: frontend }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: api, namespace: backend }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: api } }
+  template:
+    metadata: { labels: { app: api } }
+    spec:
+      containers:
+        - name: api
+          image: hashicorp/http-echo:1.0
+          args: ["-listen=:5678", "-text=api in namespace backend"]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: api, namespace: backend }
+spec:
+  selector: { app: api }
+  ports: [{ port: 80, targetPort: 5678 }]

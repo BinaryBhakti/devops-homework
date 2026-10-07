@@ -1,0 +1,59 @@
+########## ISSUE 2 — ImagePullBackOff (tag does not exist) ##########
+
+# BEFORE
+$ kubectl apply -f broken.yaml
+pod/imagepull-pod created
+
+$ kubectl wait pod/imagepull-pod --for=jsonpath={.status.containerStatuses[0].state.waiting.reason}=ImagePullBackOff --timeout=120s; kubectl get pod imagepull-pod
+pod/imagepull-pod condition met
+NAME            READY   STATUS             RESTARTS   AGE
+imagepull-pod   0/1     ImagePullBackOff   0          15s
+
+# IDENTIFY — the pod was scheduled (it has a node) but the image never arrived
+$ kubectl describe pod imagepull-pod | sed -n '/^Events:/,$p' | cut -c1-200
+Events:
+  Type     Reason     Age               From               Message
+  ----     ------     ----              ----               -------
+  Normal   Scheduled  14s               default-scheduler  Successfully assigned default/imagepull-pod to minikube
+  Warning  Failed     13s               kubelet            spec.containers{web}: Failed to pull image "nginx:1.277": rpc error: code = NotFound desc = failed to pull and unpack image "docker.io/librar
+  Warning  Failed     13s               kubelet            spec.containers{web}: Error: ErrImagePull
+  Normal   BackOff    13s               kubelet            spec.containers{web}: Back-off pulling image "nginx:1.277"
+  Warning  Failed     13s               kubelet            spec.containers{web}: Error: ImagePullBackOff
+  Normal   Pulling    1s (x2 over 15s)  kubelet            spec.containers{web}: Pulling image "nginx:1.277"
+
+# INVESTIGATE — "not found" on the manifest: the registry was reached and the repository exists, so it is the TAG. Check from outside the cluster:
+$ docker manifest inspect nginx:1.277 >/dev/null 2>&1 && echo "nginx:1.277 exists" || echo "nginx:1.277: no such manifest"
+nginx:1.277: no such manifest
+
+$ docker manifest inspect nginx:1.27 >/dev/null 2>&1 && echo "nginx:1.27 exists" || echo "nginx:1.27: no such manifest"
+nginx:1.27 exists
+
+# ROOT CAUSE: typo in the tag — 1.277 instead of 1.27.
+# FIX — the image field of a running pod IS mutable, so patch in place rather than recreate
+$ diff broken.yaml fixed.yaml
+1c1
+< # The image repository exists, the TAG does not (a typo: 1.277 instead of 1.27).
+---
+> # Fix: a tag that exists (verified with `docker manifest inspect` before applying).
+10c10
+<       image: nginx:1.277
+---
+>       image: nginx:1.27
+
+$ kubectl set image pod/imagepull-pod web=nginx:1.27
+pod/imagepull-pod image updated
+
+# VERIFY
+$ kubectl wait pod/imagepull-pod --for=condition=Ready --timeout=120s && kubectl get pod imagepull-pod
+pod/imagepull-pod condition met
+NAME            READY   STATUS    RESTARTS   AGE
+imagepull-pod   1/1     Running   0          54s
+
+$ kubectl get events --field-selector involvedObject.name=imagepull-pod --sort-by=.lastTimestamp -o custom-columns=REASON:.reason,MESSAGE:.message | tail -3 | cut -c1-140
+Pulled      Container image "nginx:1.27" already present on machine and can be accessed by the pod
+Created     Container created
+Started     Container started
+
+$ kubectl delete pod imagepull-pod
+pod "imagepull-pod" deleted from default namespace
+

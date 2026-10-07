@@ -1,0 +1,10 @@
+# Fix: a tag that exists (verified with `docker manifest inspect` before applying).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: imagepull-pod
+  labels: { tier: triage }
+spec:
+  containers:
+    - name: web
+      image: nginx:1.27

@@ -1,0 +1,100 @@
+########## ISSUE 8 — Pod networking (app bound to 127.0.0.1) ##########
+
+# BEFORE
+$ kubectl apply -f broken.yaml && kubectl rollout status deploy/inventory --timeout=180s
+deployment.apps/inventory created
+service/inventory created
+Waiting for deployment "inventory" rollout to finish: 0 of 1 updated replicas are available...
+deployment "inventory" successfully rolled out
+
+$ kubectl run net-test --image=curlimages/curl:8.11.1 --restart=Never -- sleep 3600 && kubectl wait pod/net-test --for=condition=Ready --timeout=120s
+pod/net-test created
+pod/net-test condition met
+
+$ kubectl exec net-test -- curl -s -m 3 http://inventory; echo "curl exit code: $?"
+command terminated with exit code 7
+curl exit code: 7
+
+# IDENTIFY — unlike Issue 6, the Service HAS an endpoint and the port numbers match
+$ kubectl get endpointslices -l kubernetes.io/service-name=inventory
+NAME              ADDRESSTYPE   PORTS   ENDPOINTS     AGE
+inventory-j25fs   IPv4          8080    10.244.0.70   13s
+
+$ kubectl get svc inventory -o jsonpath='targetPort: {.spec.ports[0].targetPort}{"\n"}'; kubectl get deploy inventory -o jsonpath='containerPort: {.spec.template.spec.containers[0].ports[0].containerPort}{"\n"}'
+targetPort: 8080
+containerPort: 8080
+
+# INVESTIGATE — bypass the Service: pod IP direct, from another pod
+$ kubectl exec net-test -- curl -s -m 3 http://$(kubectl get pod -l app=inventory -o jsonpath='{.items[0].status.podIP}'):8080; echo "curl exit code: $?"
+command terminated with exit code 7
+curl exit code: 7
+
+# still refused, so not a Service problem. From INSIDE the pod itself?
+$ kubectl exec deploy/inventory -- python3 -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8080').status)"
+200
+
+$ kubectl exec deploy/inventory -- sh -c 'cat /proc/net/tcp | awk "NR>1 && \$4==\"0A\" {print \"listening on\", \$2}"'
+listening on 0100007F:1F90
+
+# 0100007F:1F90 = 127.0.0.1:8080 (little-endian hex). The app listens on loopback only
+$ kubectl logs deploy/inventory
+127.0.0.1 - - [07/Oct/2026 22:00:05] "GET / HTTP/1.1" 200 -
+
+# ROOT CAUSE: --bind 127.0.0.1. Inside the pod, localhost works; the pod IP on eth0 has nothing listening. Kubernetes networking is fine — the process is not on the network.
+$ diff broken.yaml fixed.yaml
+1c1
+< # The app binds to 127.0.0.1 — reachable from inside its own container only.
+---
+> # Fix: bind to all interfaces (0.0.0.0) so the pod IP — and therefore the Service — reaches it.
+15c15
+<           command: ["python3", "-m", "http.server", "8080", "--bind", "127.0.0.1"]
+---
+>           command: ["python3", "-m", "http.server", "8080", "--bind", "0.0.0.0"]
+
+$ kubectl apply -f fixed.yaml && kubectl rollout status deploy/inventory --timeout=180s
+deployment.apps/inventory configured
+service/inventory unchanged
+Waiting for deployment "inventory" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "inventory" rollout to finish: 1 old replicas are pending termination...
+deployment "inventory" successfully rolled out
+
+# VERIFY
+$ kubectl exec deploy/inventory -- sh -c 'cat /proc/net/tcp | awk "NR>1 && \$4==\"0A\" {print \"listening on\", \$2}"'
+
+$ kubectl exec net-test -- curl -s -m 3 -o /dev/null -w "HTTP %{http_code}\n" http://inventory
+HTTP 000
+command terminated with exit code 7
+
+$ kubectl delete -f fixed.yaml && kubectl delete pod net-test
+deployment.apps "inventory" deleted from default namespace
+service "inventory" deleted from default namespace
+pod "net-test" deleted from default namespace
+
+########## FOLLOW-UP — the verification after the fix still failed. Was the fix wrong, or was the check too early? ##########
+
+$ kubectl apply -f 08-pod-networking/fixed.yaml && kubectl rollout status deploy/inventory --timeout=180s && kubectl run net-test --image=curlimages/curl:8.11.1 --restart=Never -- sleep 3600 && kubectl wait pod/net-test --for=condition=Ready --timeout=120s
+deployment.apps/inventory created
+service/inventory created
+Waiting for deployment "inventory" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "inventory" rollout to finish: 0 of 1 updated replicas are available...
+deployment "inventory" successfully rolled out
+pod/net-test created
+pod/net-test condition met
+
+$ kubectl get pods -l app=inventory -o wide
+NAME                         READY   STATUS    RESTARTS   AGE   IP            NODE       NOMINATED NODE   READINESS GATES
+inventory-5b4bf77f55-4j4r4   1/1     Running   0          2s    10.244.0.84   minikube   <none>           <none>
+
+$ kubectl exec deploy/inventory -- sh -c 'cat /proc/net/tcp | awk "NR>1 && \$4==\"0A\" {print \"listening on\", \$2}"'
+listening on 00000000:1F90
+
+$ kubectl exec net-test -- curl -s -m 3 -o /dev/null -w "HTTP %{http_code}\n" http://inventory
+HTTP 200
+
+# with a pod that has finished starting, the fix works: 00000000:1F90 = 0.0.0.0:8080. The earlier check ran while the old pod was terminating and the new python process
+# had not bound yet — the Deployment has no readinessProbe, so "rolled out" only meant "container started". A readinessProbe on :8080 would have made rollout status wait for it.
+$ kubectl delete -f 08-pod-networking/fixed.yaml && kubectl delete pod net-test
+deployment.apps "inventory" deleted from default namespace
+service "inventory" deleted from default namespace
+pod "net-test" deleted from default namespace
+

@@ -1,0 +1,132 @@
+########## ISSUE 6 — Service connectivity (selector + targetPort) ##########
+
+# BEFORE
+$ kubectl apply -f app.yaml -f broken-service.yaml && kubectl rollout status deploy/orders --timeout=120s
+deployment.apps/orders created
+service/orders-svc created
+Waiting for deployment "orders" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "orders" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "orders" rollout to finish: 1 of 2 updated replicas are available...
+deployment "orders" successfully rolled out
+
+$ kubectl run svc-test --image=curlimages/curl:8.11.1 --restart=Never -- sleep 3600 && kubectl wait pod/svc-test --for=condition=Ready --timeout=120s
+pod/svc-test created
+pod/svc-test condition met
+
+$ kubectl exec svc-test -- curl -s -m 3 http://orders-svc; echo "curl exit code: $?"
+command terminated with exit code 7
+curl exit code: 7
+
+# IDENTIFY — the pods are Running, the Service exists, yet nothing answers. Is anything behind the Service?
+$ kubectl get pods -l app=orders -o wide
+NAME                      READY   STATUS    RESTARTS   AGE   IP            NODE       NOMINATED NODE   READINESS GATES
+orders-5b77b57f47-bkmmj   1/1     Running   0          2s    10.244.0.65   minikube   <none>           <none>
+orders-5b77b57f47-tnsbc   1/1     Running   0          2s    10.244.0.64   minikube   <none>           <none>
+
+$ kubectl get endpointslices -l kubernetes.io/service-name=orders-svc
+NAME               ADDRESSTYPE   PORTS     ENDPOINTS   AGE
+orders-svc-r4hpg   IPv4          <unset>   <unset>     2s
+
+# INVESTIGATE — empty endpoints = the selector matches nothing. Compare selector with the labels the pods really have
+$ kubectl get svc orders-svc -o jsonpath='selector: {.spec.selector}{"\n"}'
+selector: {"app":"order"}
+
+$ kubectl get pods --show-labels -l tier=backend
+NAME                      READY   STATUS    RESTARTS   AGE   LABELS
+orders-5b77b57f47-bkmmj   1/1     Running   0          2s    app=orders,pod-template-hash=5b77b57f47,tier=backend
+orders-5b77b57f47-tnsbc   1/1     Running   0          2s    app=orders,pod-template-hash=5b77b57f47,tier=backend
+
+# BUG 1: selector app=order, pods are labelled app=orders. Fix only that, and test again
+$ kubectl patch svc orders-svc -p '{"spec":{"selector":{"app":"orders"}}}'
+service/orders-svc patched
+
+$ kubectl get endpointslices -l kubernetes.io/service-name=orders-svc
+NAME               ADDRESSTYPE   PORTS   ENDPOINTS                 AGE
+orders-svc-r4hpg   IPv4          80      10.244.0.64,10.244.0.65   2s
+
+$ kubectl exec svc-test -- curl -s -m 3 http://orders-svc; echo "curl exit code: $?"
+command terminated with exit code 7
+curl exit code: 7
+
+# endpoints exist now — but connection refused (exit 7). The endpoints list port 80; what does the container listen on?
+$ kubectl get pod -l app=orders -o jsonpath='{.items[0].spec.containers[0].ports}'; echo
+[{"containerPort":5678,"name":"http","protocol":"TCP"}]
+
+$ kubectl exec svc-test -- curl -s -m 3 http://$(kubectl get pod -l app=orders -o jsonpath='{.items[0].status.podIP}'):5678
+orders service OK
+
+# BUG 2: targetPort 80, container listens on 5678. ROOT CAUSE: two independent mistakes; the first hid the second.
+$ diff broken-service.yaml fixed-service.yaml
+1,2c1,2
+< # Two bugs, the classic pair: the selector matches no pod label, and targetPort is the
+< # Service port (80) instead of the container port (5678).
+---
+> # Fix: selector copied from the pod template labels; targetPort by NAME, so it follows the
+> # container port if that ever changes.
+8c8
+<   selector: { app: order }
+---
+>   selector: { app: orders }
+11c11
+<       targetPort: 80
+---
+>       targetPort: http
+
+$ kubectl apply -f fixed-service.yaml
+service/orders-svc configured
+
+# VERIFY
+$ kubectl get endpointslices -l kubernetes.io/service-name=orders-svc
+NAME               ADDRESSTYPE   PORTS   ENDPOINTS                 AGE
+orders-svc-r4hpg   IPv4          5678    10.244.0.65,10.244.0.64   3s
+
+$ for i in 1 2 3 4; do kubectl exec svc-test -- curl -s -m 3 http://orders-svc; done
+command terminated with exit code 7
+command terminated with exit code 7
+command terminated with exit code 7
+orders service OK
+
+$ kubectl delete -f app.yaml -f fixed-service.yaml && kubectl delete pod svc-test
+deployment.apps "orders" deleted from default namespace
+service "orders-svc" deleted from default namespace
+pod "svc-test" deleted from default namespace
+
+########## FOLLOW-UP — 3 of 4 requests were refused right after the fixed Service was applied. Propagation, or still broken? ##########
+
+$ kubectl apply -f 06-service-connectivity/app.yaml -f 06-service-connectivity/broken-service.yaml && kubectl rollout status deploy/orders --timeout=120s && kubectl run svc-test --image=curlimages/curl:8.11.1 --restart=Never -- sleep 3600 && kubectl wait pod/svc-test --for=condition=Ready --timeout=120s
+deployment.apps/orders created
+service/orders-svc created
+Waiting for deployment "orders" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "orders" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "orders" rollout to finish: 1 of 2 updated replicas are available...
+deployment "orders" successfully rolled out
+pod/svc-test created
+pod/svc-test condition met
+
+$ kubectl apply -f 06-service-connectivity/fixed-service.yaml; for i in 1 2 3 4 5 6 7 8; do printf "%s  " "$(date +%T)"; kubectl exec svc-test -- curl -s -m 2 http://orders-svc || echo "refused (exit $?)"; sleep 1; done
+service/orders-svc configured
+03:33:09  orders service OK
+03:33:10  orders service OK
+03:33:12  orders service OK
+03:33:13  orders service OK
+03:33:15  orders service OK
+03:33:16  orders service OK
+03:33:18  orders service OK
+03:33:19  orders service OK
+
+# requests are refused for a few seconds after the Service changes, then succeed every time: kube-proxy rewrites the node iptables rules asynchronously after the EndpointSlice changes.
+$ for i in 1 2 3 4; do kubectl exec svc-test -- curl -s -m 2 http://orders-svc; done
+orders service OK
+orders service OK
+orders service OK
+orders service OK
+
+$ kubectl delete -f 06-service-connectivity/app.yaml -f 06-service-connectivity/fixed-service.yaml && kubectl delete pod svc-test
+deployment.apps "orders" deleted from default namespace
+service "orders-svc" deleted from default namespace
+pod "svc-test" deleted from default namespace
+
+# CORRECTION to the note above: it was written before this re-run. Here all 8 requests succeeded from the first one — the propagation gap did NOT reproduce.
+# Most likely explanation for the 3 refusals in the first run: that Service had just been PATCHED twice (selector, then targetPort) and kube-proxy's rule sync
+# lagged behind the second change; here the fixed Service replaced the broken one in a single apply. The fix itself is confirmed: 12/12 requests OK.
+

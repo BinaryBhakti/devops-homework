@@ -1,0 +1,11 @@
+# Two bugs, the classic pair: the selector matches no pod label, and targetPort is the
+# Service port (80) instead of the container port (5678).
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-svc
+spec:
+  selector: { app: order }
+  ports:
+    - port: 80
+      targetPort: 80

@@ -1,0 +1,62 @@
+########## ISSUE 9 — Configuration error (CreateContainerConfigError) ##########
+
+# BEFORE
+$ kubectl apply -f broken.yaml
+secret/payments-db created
+pod/payments-pod created
+
+$ kubectl wait pod/payments-pod --for=jsonpath={.status.containerStatuses[0].state.waiting.reason}=CreateContainerConfigError --timeout=90s; kubectl get pod payments-pod
+pod/payments-pod condition met
+NAME           READY   STATUS                       RESTARTS   AGE
+payments-pod   0/1     CreateContainerConfigError   0          1s
+
+# IDENTIFY — not a crash (no restarts) and not an image problem: the kubelet refused to BUILD the container config
+$ kubectl get pod payments-pod -o jsonpath='{.status.containerStatuses[0].state.waiting.message}'; echo
+couldn't find key DB_PASSWORD in Secret default/payments-db
+
+$ kubectl describe pod payments-pod | sed -n '/^Events:/,$p' | cut -c1-160 | tail -3
+  Normal   Scheduled  1s               default-scheduler  Successfully assigned default/payments-pod to minikube
+  Normal   Pulled     1s (x2 over 2s)  kubelet            spec.containers{payments}: Container image "busybox:1.36" already present on machine and can be access
+  Warning  Failed     1s (x2 over 2s)  kubelet            spec.containers{payments}: Error: couldn't find key DB_PASSWORD in Secret default/payments-db
+
+# INVESTIGATE — what keys does the Secret really have?
+$ kubectl get secret payments-db -o jsonpath='{.data}' | tr ',' '\n'; echo
+{"password":"czNjcjN0LXBheW1lbnRz"
+"username":"cGF5bWVudHM="}
+
+$ kubectl get pod payments-pod -o jsonpath='{range .spec.containers[0].env[*]}{.name} <- secret {.valueFrom.secretKeyRef.name} key {.valueFrom.secretKeyRef.key}{"\n"}{end}'
+DB_USER <- secret payments-db key username
+DB_PASSWORD <- secret payments-db key DB_PASSWORD
+
+# ROOT CAUSE: env DB_PASSWORD asks for key "DB_PASSWORD"; the Secret only has "username" and "password".
+$ diff broken.yaml fixed.yaml
+1c1
+< # The Secret has key "password"; the pod asks for key "DB_PASSWORD".
+---
+> # Fix: reference the key that actually exists in the Secret.
+24c24
+<           valueFrom: { secretKeyRef: { name: payments-db, key: DB_PASSWORD } }
+---
+>           valueFrom: { secretKeyRef: { name: payments-db, key: password } }
+
+$ kubectl delete pod payments-pod --wait=true && kubectl apply -f fixed.yaml
+pod "payments-pod" deleted from default namespace
+secret/payments-db configured
+pod/payments-pod created
+
+# VERIFY
+$ kubectl wait pod/payments-pod --for=condition=Ready --timeout=120s && kubectl get pod payments-pod
+pod/payments-pod condition met
+NAME           READY   STATUS    RESTARTS   AGE
+payments-pod   1/1     Running   0          1s
+
+$ kubectl logs payments-pod
+payments started as payments
+
+$ kubectl exec payments-pod -- sh -c 'echo DB_PASSWORD is set: ${#DB_PASSWORD} characters'
+DB_PASSWORD is set: 15 characters
+
+$ kubectl delete -f fixed.yaml
+secret "payments-db" deleted from default namespace
+pod "payments-pod" deleted from default namespace
+

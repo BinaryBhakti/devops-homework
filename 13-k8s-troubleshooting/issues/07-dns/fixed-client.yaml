@@ -1,0 +1,10 @@
+# Fix: the service name qualified with its namespace (FQDN, so no search-list guessing).
+apiVersion: v1
+kind: Pod
+metadata: { name: web-client, namespace: frontend }
+spec:
+  containers:
+    - name: client
+      image: curlimages/curl:8.11.1
+      env: [{ name: API_URL, value: "http://api.backend.svc.cluster.local" }]
+      command: ["sh", "-c", "while true; do date +%T; curl -s -m 3 -w ' [HTTP %{http_code}]\\n' \"$API_URL\" || echo \"curl failed: exit $?\"; sleep 5; done"]

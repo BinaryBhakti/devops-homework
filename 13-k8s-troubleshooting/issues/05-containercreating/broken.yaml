@@ -1,0 +1,17 @@
+# Mounts a ConfigMap that was never created. The pod is scheduled, but the kubelet cannot
+# build the volume, so the container is never created.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: containercreating-pod
+  labels: { tier: triage }
+spec:
+  containers:
+    - name: web
+      image: nginx:1.27-alpine
+      volumeMounts:
+        - { name: site-config, mountPath: /etc/nginx/conf.d }
+  volumes:
+    - name: site-config
+      configMap:
+        name: nginx-site-config

@@ -1,0 +1,22 @@
+# Fix: a limit sized to the measured working set plus headroom (the real fix for a leak is the code).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: oomkilled-pod
+  labels: { tier: triage }
+spec:
+  containers:
+    - name: memory-hog
+      image: python:3.11-alpine
+      command:
+        - python3
+        - -c
+        - |
+          import time
+          print("Allocating memory rapidly...", flush=True)
+          chunks = [b"x" * (10 * 1024 * 1024) for _ in range(20)]
+          print(f"holding {len(chunks) * 10} MiB", flush=True)
+          time.sleep(3600)
+      resources:
+        limits:
+          memory: "320Mi"

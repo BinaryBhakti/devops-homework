@@ -1,0 +1,75 @@
+########## ISSUE 3 — ErrImagePull (repository does not exist / needs auth) ##########
+
+# BEFORE — catch the FIRST state, before the back-off kicks in
+$ kubectl apply -f broken.yaml
+pod/errimagepull-pod created
+
+$ kubectl wait pod/errimagepull-pod --for=jsonpath={.status.containerStatuses[0].state.waiting.reason}=ErrImagePull --timeout=60s; kubectl get pod errimagepull-pod
+pod/errimagepull-pod condition met
+NAME               READY   STATUS         RESTARTS   AGE
+errimagepull-pod   0/1     ErrImagePull   0          3s
+
+$ kubectl get pod errimagepull-pod -o jsonpath='{.status.containerStatuses[0].state.waiting.message}' | fold -w 160; echo
+failed to pull and unpack image "docker.io/library/yatri-api-service:v999-invalid-tag-does-not-exist": failed to resolve reference "docker.io/library/yatri-api-
+service:v999-invalid-tag-does-not-exist": pull access denied, repository does not exist or may require authorization: server message: insufficient_scope: author
+ization failed
+
+# ErrImagePull = this pull attempt failed. ImagePullBackOff = the kubelet is now waiting before the next attempt. Same problem, two phases:
+$ kubectl wait pod/errimagepull-pod --for=jsonpath={.status.containerStatuses[0].state.waiting.reason}=ImagePullBackOff --timeout=120s; kubectl get pod errimagepull-pod
+pod/errimagepull-pod condition met
+NAME               READY   STATUS             RESTARTS   AGE
+errimagepull-pod   0/1     ImagePullBackOff   0          14s
+
+# INVESTIGATE — this message differs from Issue 2: "pull access denied ... repository does not exist or may require authorization"
+$ kubectl describe pod errimagepull-pod | grep -E 'Image:|Failed' | cut -c1-220 | head -4
+    Image:          yatri-api-service:v999-invalid-tag-does-not-exist
+  Warning  Failed     12s               kubelet            spec.containers{web-app}: Failed to pull image "yatri-api-service:v999-invalid-tag-does-not-exist": failed to pull and unpack image "docker.io/library/yatri-api-
+  Warning  Failed     12s               kubelet            spec.containers{web-app}: Error: ErrImagePull
+  Warning  Failed     11s               kubelet            spec.containers{web-app}: Error: ImagePullBackOff
+
+$ kubectl get pod errimagepull-pod -o jsonpath='imagePullSecrets: {.spec.imagePullSecrets}'; echo '(none)'
+imagePullSecrets: (none)
+
+# ROOT CAUSE: "yatri-api-service" has no registry prefix, so it resolves to docker.io/library/yatri-api-service — which does not exist. A private image needs its full registry path AND an imagePullSecret; Docker Hub deliberately returns the same "denied" for missing and private repos.
+$ diff broken.yaml fixed.yaml
+1,2c1,2
+< # Course scenario 2: the REPOSITORY does not exist on Docker Hub (an internal image name
+< # referenced without its private registry prefix).
+---
+> # Fix: reference an image that exists in a registry the node can reach. For a real private
+> # image this would be the full registry path plus an imagePullSecret.
+11c11,12
+<       image: yatri-api-service:v999-invalid-tag-does-not-exist
+---
+>       image: hashicorp/http-echo:1.0
+>       args: ["-listen=:8080", "-text=yatri-api-service stand-in"]
+
+$ kubectl delete pod errimagepull-pod --wait=true && kubectl apply -f fixed.yaml
+pod "errimagepull-pod" deleted from default namespace
+pod/errimagepull-pod created
+
+# VERIFY
+$ kubectl wait pod/errimagepull-pod --for=condition=Ready --timeout=120s && kubectl get pod errimagepull-pod -o wide
+pod/errimagepull-pod condition met
+NAME               READY   STATUS    RESTARTS   AGE   IP            NODE       NOMINATED NODE   READINESS GATES
+errimagepull-pod   1/1     Running   0          8s    10.244.0.60   minikube   <none>           <none>
+
+$ kubectl exec errimagepull-pod -- wget -qO- localhost:8080 2>/dev/null || kubectl run t --rm -i --quiet --restart=Never --image=curlimages/curl:8.11.1 -- curl -s $(kubectl get pod errimagepull-pod -o jsonpath='{.status.podIP}'):8080
+
+$ kubectl delete pod errimagepull-pod
+pod "errimagepull-pod" deleted from default namespace
+
+########## FOLLOW-UP — the last verification printed nothing (http-echo has no wget; the fallback curl pod lost its output). Verify properly: ##########
+
+$ kubectl apply -f 03-errimagepull/fixed.yaml && kubectl wait pod/errimagepull-pod --for=condition=Ready --timeout=120s
+pod/errimagepull-pod created
+pod/errimagepull-pod condition met
+
+$ kubectl run t --image=curlimages/curl:8.11.1 --restart=Never -- curl -s $(kubectl get pod errimagepull-pod -o jsonpath="{.status.podIP}"):8080 && kubectl wait pod/t --for=jsonpath={.status.phase}=Succeeded --timeout=60s >/dev/null && kubectl logs t
+pod/t created
+yatri-api-service stand-in
+
+$ kubectl delete pod t errimagepull-pod
+pod "t" deleted from default namespace
+pod "errimagepull-pod" deleted from default namespace
+

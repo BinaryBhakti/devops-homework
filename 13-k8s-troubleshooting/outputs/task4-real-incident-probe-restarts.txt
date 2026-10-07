@@ -1,0 +1,313 @@
+########## REAL INCIDENT — ingress controller and control plane restarting (found, not staged) ##########
+
+$ date
+Wed Oct  7 21:11:24 IST 2026
+
+# symptom: restart counts that should be 0 on an idle 19-day-old cluster
+$ kubectl get pods -A
+NAMESPACE       NAME                                       READY   STATUS      RESTARTS          AGE
+ingress-nginx   ingress-nginx-admission-create-jkqlx       0/1     Completed   0                 19d
+ingress-nginx   ingress-nginx-admission-patch-zxwjp        0/1     Completed   0                 19d
+ingress-nginx   ingress-nginx-controller-d7cd8c989-ncxrt   1/1     Running     135 (3m52s ago)   19d
+kube-system     coredns-559f6c778d-gndv7                   1/1     Running     22 (6m21s ago)    19d
+kube-system     etcd-minikube                              1/1     Running     1 (19d ago)       19d
+kube-system     kindnet-g7hkk                              1/1     Running     1 (19d ago)       19d
+kube-system     kindnet-kg9vg                              1/1     Running     1 (19d ago)       19d
+kube-system     kube-apiserver-minikube                    1/1     Running     53 (5m31s ago)    19d
+kube-system     kube-controller-manager-minikube           1/1     Running     16 (6d9h ago)     19d
+kube-system     kube-proxy-dr6pr                           1/1     Running     1 (19d ago)       19d
+kube-system     kube-proxy-sxfh8                           1/1     Running     1 (19d ago)       19d
+kube-system     kube-scheduler-minikube                    1/1     Running     7 (6m5s ago)      19d
+kube-system     storage-provisioner                        1/1     Running     404 (47m ago)     19d
+
+$ kubectl get pods -A --sort-by=.status.containerStatuses[0].restartCount -o custom-columns=NS:.metadata.namespace,POD:.metadata.name,RESTARTS:.status.containerStatuses[0].restartCount,NODE:.spec.nodeName | tail -6
+kube-system     kube-scheduler-minikube                    7          minikube
+kube-system     kube-controller-manager-minikube           16         minikube
+kube-system     coredns-559f6c778d-gndv7                   22         minikube
+kube-system     kube-apiserver-minikube                    53         minikube
+ingress-nginx   ingress-nginx-controller-d7cd8c989-ncxrt   135        minikube
+kube-system     storage-provisioner                        404        minikube
+
+# why was the ingress controller killed? the last terminated state + events
+$ kubectl describe pod -n ingress-nginx -l app.kubernetes.io/component=controller | sed -n '/Last State/,/Exit Code/p;/Liveness:/p;/Readiness:/p'
+    Last State:     Terminated
+      Reason:       Error
+      Exit Code:    143
+    Liveness:   http-get http://:10254/healthz delay=10s timeout=1s period=10s #success=1 #failure=5
+    Readiness:  http-get http://:10254/healthz delay=10s timeout=1s period=10s #success=1 #failure=3
+
+$ kubectl get events -n ingress-nginx --field-selector involvedObject.kind=Pod -o custom-columns=LAST:.lastTimestamp,COUNT:.count,REASON:.reason,MESSAGE:.message | cut -c1-200
+LAST                   COUNT   REASON                 MESSAGE
+2026-10-07T14:46:55Z   29      TaintManagerEviction   Cancelling deletion of Pod ingress-nginx/ingress-nginx-admission-create-jkqlx
+2026-10-07T14:46:55Z   29      TaintManagerEviction   Cancelling deletion of Pod ingress-nginx/ingress-nginx-admission-patch-zxwjp
+2026-10-07T15:37:59Z   136     Created                Container created
+2026-10-07T15:38:01Z   136     Started                Container started
+2026-10-07T15:39:15Z   2635    Unhealthy              Readiness probe failed: Get "http://10.244.0.35:10254/healthz": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+2026-10-07T14:54:33Z   1757    Unhealthy              Liveness probe failed: Get "http://10.244.0.35:10254/healthz": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+2026-10-07T15:37:17Z   148     Killing                Container controller failed liveness probe, will be restarted
+2026-10-07T15:37:58Z   135     Pulled                 Container image "registry.k8s.io/ingress-nginx/controller:v1.15.1@sha256:594ceea76b01c592858f803f9ff4d2cb40542cae2060410b2c95f75907d659e1" already
+2026-10-07T14:46:55Z   29      TaintManagerEviction   Cancelling deletion of Pod ingress-nginx/ingress-nginx-controller-d7cd8c989-ncxrt
+2026-10-07T14:46:42Z   20      NodeNotReady           Node is not ready
+2026-10-07T14:40:16Z   1       RELOAD                 Error reloading NGINX: 
+-------------------------------------------------------------------------------
+Error: signal: terminated
+nginx: the configuration file /tmp/nginx/nginx-cfg1342207489 syntax is ok
+
+-------------------------------------------------------------------------------
+
+2026-10-07T14:41:14Z   1       RELOAD                 NGINX reload triggered due to a change in configuration
+2026-10-07T15:38:11Z   1       RELOAD                 NGINX reload triggered due to a change in configuration
+
+# exit code 143 = 128 + 15 (SIGTERM): the kubelet killed it after liveness failed — the app did not crash
+# is it the pod, or the node underneath it?
+$ kubectl get events -A --field-selector reason=NodeNotReady -o custom-columns=LAST:.lastTimestamp,COUNT:.count,OBJECT:.involvedObject.name,MESSAGE:.message
+LAST                   COUNT   OBJECT                                     MESSAGE
+2026-10-07T15:28:08Z   82      minikube                                   Node minikube status is now: NodeNotReady
+2026-10-07T14:46:14Z   16      minikube                                   Node minikube status is now: NodeNotReady
+2026-10-07T14:46:42Z   20      ingress-nginx-controller-d7cd8c989-ncxrt   Node is not ready
+2026-10-07T14:46:41Z   18      coredns-559f6c778d-gndv7                   Node is not ready
+2026-10-07T14:46:27Z   18      etcd-minikube                              Node is not ready
+2026-10-07T14:46:28Z   25      kindnet-g7hkk                              Node is not ready
+2026-10-07T14:46:29Z   18      kube-apiserver-minikube                    Node is not ready
+2026-10-07T14:46:37Z   25      kube-controller-manager-minikube           Node is not ready
+2026-10-07T14:46:32Z   17      kube-proxy-sxfh8                           Node is not ready
+2026-10-07T14:46:39Z   20      kube-scheduler-minikube                    Node is not ready
+2026-10-07T14:46:42Z   19      storage-provisioner                        Node is not ready
+
+$ kubectl describe node minikube | sed -n '/Conditions:/,/Addresses:/p'
+Conditions:
+  Type             Status  LastHeartbeatTime                 LastTransitionTime                Reason                       Message
+  ----             ------  -----------------                 ------------------                ------                       -------
+  MemoryPressure   False   Wed, 07 Oct 2026 21:07:55 +0530   Wed, 07 Oct 2026 20:16:25 +0530   KubeletHasSufficientMemory   kubelet has sufficient memory available
+  DiskPressure     False   Wed, 07 Oct 2026 21:07:55 +0530   Wed, 07 Oct 2026 20:16:26 +0530   KubeletHasNoDiskPressure     kubelet has no disk pressure
+  PIDPressure      False   Wed, 07 Oct 2026 21:07:55 +0530   Wed, 07 Oct 2026 20:16:26 +0530   KubeletHasSufficientPID      kubelet has sufficient PID available
+  Ready            True    Wed, 07 Oct 2026 21:07:55 +0530   Wed, 07 Oct 2026 20:16:26 +0530   KubeletReady                 kubelet is posting ready status
+Addresses:
+
+$ kubectl describe node minikube | sed -n '/Capacity:/,/Allocatable:/p'
+Capacity:
+  cpu:                8
+  ephemeral-storage:  240120725504
+  hugepages-1Gi:      0
+  hugepages-2Mi:      0
+  hugepages-32Mi:     0
+  hugepages-64Ki:     0
+  memory:             4010356Ki
+  pods:               110
+Allocatable:
+
+$ docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}' minikube minikube-m02
+NAME           MEM USAGE / LIMIT     MEM %
+minikube       1.071GiB / 1.758GiB   60.95%
+minikube-m02   255.1MiB / 1.758GiB   14.17%
+
+$ kubectl logs -n kube-system kube-apiserver-minikube --previous 2>&1 | tail -5 | cut -c1-220
+I1007 15:35:31.906773       1 stats.go:119] "Error getting keys" err="Timeout: Too large resource version: 456301, current: 456299"
+I1007 15:35:31.976993       1 stats.go:119] "Error getting keys" err="Timeout: Too large resource version: 456301, current: 456299"
+I1007 15:35:32.637003       1 stats.go:119] "Error getting keys" err="Timeout: Too large resource version: 456301, current: 456299"
+W1007 15:35:41.298358       1 controller.go:141] RemoveEndpoints() timed out
+I1007 15:35:48.932779       1 stats.go:119] "Error getting keys" err="Timeout: Too large resource version: 456301, current: 456299"
+
+$ docker inspect minikube --format 'memory limit: {{.HostConfig.Memory}} bytes'
+memory limit: 1887436800 bytes
+
+# the node advertises 4010356Ki (the whole Docker VM) but its container is capped at 1.76 GiB — check for OOM kills inside the node
+$ minikube ssh -- 'sudo dmesg 2>/dev/null | grep -iE "out of memory|oom-kill|killed process" | tail -8'
+
+$ minikube ssh -- 'cat /sys/fs/cgroup/memory.max; cat /sys/fs/cgroup/memory.events'
+1887436800
+low 0
+high 0
+max 25289236
+oom 0
+oom_kill 0
+oom_group_kill 0
+sock_throttled 23
+
+$ minikube ssh -- uptime
+ 15:41:49 up 13 days,  8:29,  0 user,  load average: 7.81, 15.47, 17.95
+
+# escalation: 10 minutes later, during the next lab, the API server stopped answering entirely
+$ date
+Wed Oct  7 21:23:32 IST 2026
+
+# (kubectl at 21:20 IST: "Unable to connect to the server: net/http: TLS handshake timeout")
+$ docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.CPUPerc}}' minikube minikube-m02
+NAME           MEM USAGE / LIMIT     CPU %
+minikube       1014MiB / 2.832GiB    181.56%
+minikube-m02   300.5MiB / 1.758GiB   29.82%
+
+# ROOT CAUSE: the control-plane node container sits at its 1.76 GiB cgroup cap (memory.events max=25M) and burns CPU reclaiming pages;
+# kube-apiserver, etcd and the ingress controller all stall, probes with timeoutSeconds=1 fail, the kubelet SIGTERMs (exit 143) and restarts them.
+# The node reports the whole VM (4010356Ki) as capacity, so the scheduler and MemoryPressure never see the real 1.76 GiB limit.
+# FIX: raise the node container limit in place (no cluster rebuild) — docker update works on a running container
+$ docker update --memory 2900m --memory-swap 2900m minikube
+minikube
+
+$ docker inspect minikube --format 'memory limit: {{.HostConfig.Memory}} bytes'
+memory limit: 3040870400 bytes
+
+$ kubectl get --raw /readyz; echo
+ok
+
+$ docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.CPUPerc}}' minikube minikube-m02
+NAME           MEM USAGE / LIMIT     MEM %     CPU %
+minikube       1GiB / 2.832GiB       35.32%    194.67%
+minikube-m02   292.6MiB / 1.758GiB   16.25%    44.73%
+
+$ kubectl get pods -A -o custom-columns=NS:.metadata.namespace,POD:.metadata.name,RESTARTS:.status.containerStatuses[0].restartCount | grep -E "NS|apiserver|ingress-nginx-controller|coredns|storage"
+NS              POD                                        RESTARTS
+ingress-nginx   ingress-nginx-controller-d7cd8c989-ncxrt   137
+kube-system     coredns-559f6c778d-gndv7                   22
+kube-system     kube-apiserver-minikube                    54
+kube-system     storage-provisioner                        406
+
+########## RECURRENCE (22:00–22:50 IST) — same symptom, different resource: CPU ##########
+
+# during the HPA lab (Homework 12) the API server stopped answering again, although memory was now at 1.1 of 2.8 GiB
+# (kubectl at 22:09 IST: "Unable to connect to the server: net/http: TLS handshake timeout")
+# evidence 1 — the HPA sampler went silent for ~7 minutes (it prints every 15 s):
+$ grep -E '^hpa-demo +Deploy' ../12-storage-hpa-probes/outputs/task2-hpa-attempt1-timeline.txt | sed -n '9,14p'
+hpa-demo   Deployment/hpa-demo   cpu: 66%/50%   1     5     2     4m36s
+hpa-demo   Deployment/hpa-demo   cpu: 66%/50%   1     5     2     4m54s
+hpa-demo   Deployment/hpa-demo   cpu: 66%/50%   1     5     2     5m10s
+hpa-demo   Deployment/hpa-demo   cpu: 66%/50%   1     5     2     5m30s
+hpa-demo   Deployment/hpa-demo   cpu: 66%/50%   1     5     2     5m46s
+hpa-demo   Deployment/hpa-demo   cpu: 66%/50%   1     5     2     6m12s
+
+# evidence 2 — the load generator: 4 busybox wget loops with NO cpu limit, scheduled onto the control-plane node
+$ git -C .. show HEAD:12-storage-hpa-probes/02-hpa/load-generator.yaml 2>/dev/null | grep -A3 resources || echo '(attempt-1 manifest had: requests cpu 10m, limits memory only — no cpu limit)'
+(attempt-1 manifest had: requests cpu 10m, limits memory only — no cpu limit)
+
+# evidence 3 — collateral damage: two more components died because they could not reach the API server
+$ kubectl -n kube-system get pods -l k8s-app=metrics-server -o custom-columns=POD:.metadata.name,RESTARTS:.status.containerStatuses[0].restartCount
+POD                               RESTARTS
+metrics-server-768f9f6999-45mqh   0
+
+$ kubectl logs -n kube-system storage-provisioner --previous 2>&1 | grep -E 'failed to renew lease|leaderelection lost' | cut -c1-160 | tail -2
+I1007 16:50:41.540025       1 leaderelection.go:278] failed to renew lease kube-system/k8s.io-minikube-hostpath: timed out waiting for the condition
+F1007 16:50:41.566379       1 controller.go:913] leaderelection lost
+
+# metrics-server (previous container) died with: panic: unable to load configmap based request-header-client-ca-file: Get "https://10.96.0.1:443/...": net/http: TLS handshake timeout
+# ROOT CAUSE (recurrence): unlimited CPU consumers on the same node as kube-apiserver/etcd. CPU is compressible, so nothing is killed — everything just gets slow,
+# and every component with a 1 s probe timeout or a lease deadline fails in turn. Leader-elected components (storage-provisioner, controllers) exit on purpose when they lose the lease.
+# FIX: give the load generator a CPU limit (150m) and a nodeSelector for the worker node; stop the idle LocalStack container (it was spinning at 235% CPU on failed DNS lookups)
+$ kubectl get deploy -n default load-generator -o jsonpath='{.spec.template.spec.nodeSelector}{" "}{.spec.template.spec.containers[0].resources}{"\n"}' 2>/dev/null || grep -A2 -E 'nodeSelector|limits' ../12-storage-hpa-probes/02-hpa/load-generator.yaml
+# The CPU limit and the nodeSelector are lessons from the first attempt: four UNLIMITED wget
+# loops each ate a full core on the control-plane node and starved kube-apiserver until it
+# stopped answering. A load generator is a noisy neighbour; give it a ceiling and keep it off
+--
+      nodeSelector:
+        kubernetes.io/hostname: minikube-m02
+      containers:
+--
+            limits: { cpu: 150m, memory: 32Mi }
+
+$ kubectl get --raw /readyz; echo
+ok
+
+$ kubectl top nodes
+NAME           CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
+minikube       834m         10%      1190Mi          30%         
+minikube-m02   211m         2%       376Mi           9%          
+
+########## RECURRENCE 2 (22:45 IST) — slow again with NO load running: the real CPU root cause ##########
+
+# kubectl hung again after the HPA lab ended. Node container at 273% "CPU" in docker stats — but what does the kernel say?
+$ docker exec minikube sh -c 'for f in cpu io memory; do echo "$f pressure: $(head -1 /proc/pressure/$f)"; done'
+cpu pressure: some avg10=91.88 avg60=90.99 avg300=82.76 total=124036014273
+io pressure: some avg10=1.41 avg60=1.39 avg300=2.23 total=1578502087
+memory pressure: some avg10=4.02 avg60=3.65 avg300=3.71 total=3142175966
+
+$ docker exec minikube sh -c 'top -b -n1 | sed -n 3p'
+%Cpu(s): 66.1 us, 32.2 sy,  0.0 ni,  0.8 id,  0.0 wa,  0.0 hi,  0.8 si,  0.0 st 
+
+# CPU pressure 92% (processes waiting for CPU most of the time) while top shows ~53% idle: that combination means a CPU QUOTA, not a busy machine
+$ docker inspect minikube minikube-m02 --format '{{.Name}} NanoCpus={{.HostConfig.NanoCpus}}'
+/minikube NanoCpus=2000000000
+/minikube-m02 NanoCpus=2000000000
+
+$ docker exec minikube sh -c 'echo "cpu.max: $(cat /sys/fs/cgroup/cpu.max)"; grep -E "nr_periods|nr_throttled|throttled_usec" /sys/fs/cgroup/cpu.stat'
+cpu.max: 1600000 800000
+nr_periods 978194
+nr_throttled 121770
+throttled_usec 330726353524
+
+$ kubectl get node minikube -o jsonpath='kubelet advertises: cpu={.status.allocatable.cpu} memory={.status.allocatable.memory}{"\n"}'
+Unable to connect to the server: net/http: TLS handshake timeout
+
+# ROOT CAUSE (complete picture): the node containers were created with `minikube start --cpus=2 --memory=1800` (Homework 8). Docker enforces those caps, but the kubelet
+# reports the whole VM (8 CPUs, ~3.8 GiB) as allocatable. The scheduler and every component believe they have 4x the CPU they get; the cgroup has been
+# throttled for ~330,000 s (~92 h) in total. Probes with timeoutSeconds=1 time out under throttling, which explains every restart counted above.
+# FIX: raise the caps in place on the running containers (no rebuild, no data loss), leaving headroom for the host
+$ docker update --cpus 6 minikube && docker update --cpus 4 minikube-m02
+minikube
+minikube-m02
+
+$ docker inspect minikube minikube-m02 --format '{{.Name}} NanoCpus={{.HostConfig.NanoCpus}}'
+/minikube NanoCpus=6000000000
+/minikube-m02 NanoCpus=4000000000
+
+$ sleep 60; docker exec minikube sh -c 'echo "cpu.max: $(cat /sys/fs/cgroup/cpu.max)"; for f in cpu; do echo "$f pressure: $(head -1 /proc/pressure/$f)"; done'
+cpu.max: 600000 100000
+cpu pressure: some avg10=80.09 avg60=84.48 avg300=82.97 total=124107218650
+
+$ kubectl get --raw /readyz; echo
+Error from server (InternalError): an error on the server ("[+]ping ok\n[+]log ok\n[-]etcd failed: reason withheld\n[+]etcd-readiness ok\n[-]informer-sync failed: reason withheld\n[+]poststarthook/start-apiserver-admission-initializer ok\n[+]poststarthook/generic-apiserver-start-informers ok\n[+]poststarthook/priority-and-fairness-config-consumer ok\n[+]poststarthook/priority-and-fairness-filter ok\n[+]poststarthook/storage-object-count-tracker-hook ok\n[+]poststarthook/start-apiextensions-informers ok\n[-]poststarthook/start-apiextensions-controllers failed: reason withheld\n[+]poststarthook/crd-informer-synced ok\n[+]poststarthook/start-system-namespaces-controller ok\n[+]poststarthook/peer-endpoint-reconciler-controller ok\n[+]poststarthook/start-cluster-authentication-info-controller ok\n[+]poststarthook/start-kube-apiserver-identity-lease-controller ok\n[+]poststarthook/start-kube-apiserver-identity-lease-garbage-collector ok\n[+]poststarthook/storage-readiness ok\n[+]poststarthook/start-legacy-token-tracking-controller ok\n[-]poststarthook/start-service-ip-repair-controllers failed: reason withheld\n[-]poststarthook/rbac/bootstrap-roles failed: reason withheld\n[-]poststarthook/scheduling/bootstrap-system-priority-classes failed: reason withheld\n[-]poststarthook/priority-and-fairness-config-producer failed: reason withheld\n[-]poststarthook/bootstrap-controller failed: reason withheld\n[-]poststarthook/start-kubernetes-service-cidr-controller failed: reason withheld\n[+]poststarthook/aggregator-reload-proxy-client-cert ok\n[+]poststarthook/start-kube-aggregator-informers ok\n[+]poststarthook/apiservice-status-local-available-controller ok\n[+]poststarthook/apiservice-status-remote-available-controller ok\n[-]poststarthook/apiservice-registration-controller failed: reason withheld\n[-]poststarthook/apiservice-discovery-controller failed: reason withheld\n[+]poststarthook/kube-apiserver-autoregistration ok\n[-]autoregister-completion failed: reason withheld\n[+]poststarthook/apiservice-openapi-controller ok\n[+]poststarthook/apiservice-openapiv3-controller ok\n[+]shutdown ok\nreadyz check failed") has prevented the request from succeeding
+
+
+# CORRECTION to the note above: the ~53% idle figure came from a top sample taken a minute earlier; the sample captured here shows 0.8% idle.
+# Either way the cgroup quota (cpu.max 1600000/800000 = 2 CPUs) and nr_throttled are the evidence; idle% inside a throttled cgroup is not meaningful.
+# AFTER the fix the API recovered, but host load stayed high (two background docker builds/scans on the same Mac) — the Docker VM itself was now the contended resource.
+$ docker exec minikube sh -c 'echo "cpu.max: $(cat /sys/fs/cgroup/cpu.max)"'
+cpu.max: 600000 100000
+
+$ kubectl get --raw /readyz; echo
+ok
+
+########## AFTER — state once all fixes were in place (03:40 IST, ~5 h later) ##########
+
+# what was changed, in order: node memory cap 1.76 -> 2.83 GiB; node CPU caps 2 -> 6 (control plane) and 4 (worker); idle LocalStack stopped;
+# background builds throttled to --cpus=1; worker node stopped (minikube node stop m02) and the cluster restarted once (minikube stop/start) to clear a restart storm.
+# the host itself stayed the limiting factor: an 8 GB Mac with ~10 GB of swap in use. That cannot be fixed from inside Kubernetes.
+$ date
+Thu Oct  8 03:35:33 IST 2026
+
+$ docker inspect minikube --format 'NanoCpus={{.HostConfig.NanoCpus}} Memory={{.HostConfig.Memory}}'
+NanoCpus=6000000000 Memory=3040870400
+
+$ docker exec minikube sh -c 'echo "cpu.max: $(cat /sys/fs/cgroup/cpu.max)"; echo "cpu pressure: $(head -1 /proc/pressure/cpu)"; echo "mem pressure: $(head -1 /proc/pressure/memory)"'
+cpu.max: 1200000 200000
+cpu pressure: some avg10=40.39 avg60=26.08 avg300=17.98 total=129334738235
+mem pressure: some avg10=0.41 avg60=0.31 avg300=0.27 total=3578208995
+
+$ kubectl get --raw /readyz; echo
+ok
+
+$ kubectl get pods -A -o custom-columns=NS:.metadata.namespace,POD:.metadata.name,RESTARTS:.status.containerStatuses[0].restartCount,STARTED:.status.containerStatuses[0].state.running.startedAt | grep -E 'NS|apiserver|ingress-nginx-controller|coredns|storage|metrics|etcd|scheduler'
+NS              POD                                        RESTARTS   STARTED
+ingress-nginx   ingress-nginx-controller-d7cd8c989-gvnsv   16         2026-10-07T19:04:33Z
+kube-system     coredns-559f6c778d-gndv7                   25         2026-10-07T19:03:05Z
+kube-system     etcd-minikube                              2          2026-10-07T19:02:16Z
+kube-system     kube-apiserver-minikube                    65         2026-10-07T19:02:16Z
+kube-system     kube-scheduler-minikube                    9          2026-10-07T19:02:16Z
+kube-system     metrics-server-768f9f6999-gb88p            1          2026-10-07T21:19:14Z
+kube-system     storage-provisioner                        437        2026-10-07T19:12:16Z
+
+# all of Homework 13 Task 2 (ten scenarios, ~40 pod create/delete cycles) ran on this cluster after the fixes without a single API timeout:
+$ grep -c 'Unable to connect to the server' outputs/task2-*.txt
+outputs/task2-01-crashloopbackoff.txt:0
+outputs/task2-02-imagepullbackoff.txt:0
+outputs/task2-03-errimagepull.txt:0
+outputs/task2-04-pending.txt:0
+outputs/task2-05-containercreating.txt:0
+outputs/task2-06-service-connectivity.txt:0
+outputs/task2-07-dns.txt:0
+outputs/task2-08-pod-networking.txt:0
+outputs/task2-09-configuration.txt:0
+outputs/task2-10-oomkilled.txt:0
+
+$ docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}' minikube
+NAME       CPU %     MEM USAGE / LIMIT
+minikube   72.78%    1.268GiB / 2.832GiB
+

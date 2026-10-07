@@ -1,0 +1,359 @@
+########## TASK 1 — the troubleshooting commands, hands-on ##########
+
+$ kubectl apply -f demo-app.yaml && kubectl rollout status deploy/web --timeout=120s && kubectl wait pod/logs-demo --for=condition=Ready --timeout=120s && sleep 20
+deployment.apps/web created
+service/web created
+pod/logs-demo created
+Waiting for deployment "web" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "web" rollout to finish: 1 of 2 updated replicas are available...
+deployment "web" successfully rolled out
+pod/logs-demo condition met
+
+# 1. kubectl get — "what exists, and what state is it in?"
+$ kubectl get pods
+NAME                   READY   STATUS    RESTARTS   AGE
+logs-demo              1/1     Running   0          23s
+web-78b458b948-t5mtp   1/1     Running   0          23s
+web-78b458b948-zfw5f   1/1     Running   0          23s
+
+$ kubectl get deploy,rs,svc,endpointslices -l "app=web" ; kubectl get endpointslices -l kubernetes.io/service-name=web
+NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/web   2/2     2            2           23s
+
+NAME                             DESIRED   CURRENT   READY   AGE
+replicaset.apps/web-78b458b948   2         2         2       23s
+NAME        ADDRESSTYPE   PORTS   ENDPOINTS                 AGE
+web-f9l55   IPv4          80      10.244.0.53,10.244.0.55   23s
+
+$ kubectl get pods --show-labels
+NAME                   READY   STATUS    RESTARTS   AGE   LABELS
+logs-demo              1/1     Running   0          23s   app=logs-demo
+web-78b458b948-t5mtp   1/1     Running   0          23s   app=web,pod-template-hash=78b458b948
+web-78b458b948-zfw5f   1/1     Running   0          23s   app=web,pod-template-hash=78b458b948
+
+$ kubectl get pods -l app=web -o name
+pod/web-78b458b948-t5mtp
+pod/web-78b458b948-zfw5f
+
+$ kubectl get pods -o custom-columns=POD:.metadata.name,NODE:.spec.nodeName,IP:.status.podIP,RESTARTS:.status.containerStatuses[0].restartCount,IMAGE:.spec.containers[0].image
+POD                    NODE       IP            RESTARTS   IMAGE
+logs-demo              minikube   10.244.0.54   0          busybox:1.36
+web-78b458b948-t5mtp   minikube   10.244.0.55   0          nginx:1.27-alpine
+web-78b458b948-zfw5f   minikube   10.244.0.53   0          nginx:1.27-alpine
+
+$ kubectl get pod logs-demo -o jsonpath='{.status.phase} on {.spec.nodeName}, started {.status.startTime}{"\n"}'
+Running on minikube, started 2026-10-07T21:52:15Z
+
+$ kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded
+NAMESPACE     NAME               READY   STATUS    RESTARTS   AGE
+kube-system   kindnet-rwc7g      0/1     Pending   0          162m
+kube-system   kube-proxy-cknj8   0/1     Pending   0          162m
+
+# 2. kubectl get -o wide — the same list plus IP and NODE: the first thing to check for "only some requests fail"
+$ kubectl get pods -o wide
+NAME                   READY   STATUS    RESTARTS   AGE   IP            NODE       NOMINATED NODE   READINESS GATES
+logs-demo              1/1     Running   0          24s   10.244.0.54   minikube   <none>           <none>
+web-78b458b948-t5mtp   1/1     Running   0          24s   10.244.0.55   minikube   <none>           <none>
+web-78b458b948-zfw5f   1/1     Running   0          24s   10.244.0.53   minikube   <none>           <none>
+
+$ kubectl get nodes -o wide
+NAME           STATUS     ROLES           AGE   VERSION   INTERNAL-IP    EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION            CONTAINER-RUNTIME
+minikube       Ready      control-plane   19d   v1.37.0   192.168.49.2   <none>        Debian GNU/Linux 12 (bookworm)   7.0.12-linuxkit (arm64)   containerd://2.3.4
+minikube-m02   NotReady   <none>          19d   v1.37.0   192.168.49.3   <none>        Debian GNU/Linux 12 (bookworm)   7.0.12-linuxkit (arm64)   containerd://2.3.4
+
+$ kubectl get svc web -o wide
+NAME   TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE   SELECTOR
+web    ClusterIP   10.108.234.93   <none>        80/TCP    24s   app=web
+
+# 3. kubectl describe — "why is it in that state?" (spec + status + conditions + events in one view)
+$ kubectl describe pod -l app=web | sed -n '1,/^Events/p' | head -60
+Name:             web-78b458b948-t5mtp
+Namespace:        default
+Priority:         0
+Service Account:  default
+Node:             minikube/192.168.49.2
+Start Time:       Thu, 08 Oct 2026 03:22:15 +0530
+Labels:           app=web
+                  pod-template-hash=78b458b948
+Annotations:      <none>
+Status:           Running
+IP:               10.244.0.55
+IPs:
+  IP:           10.244.0.55
+Controlled By:  ReplicaSet/web-78b458b948
+Containers:
+  nginx:
+    Container ID:   containerd://7c89a094413c29f52b3b2d39e4c53202f2a0acdbbd419878b21446fc5db1ee8a
+    Image:          nginx:1.27-alpine
+    Image ID:       docker.io/library/nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    Port:           80/TCP
+    Host Port:      0/TCP
+    State:          Running
+      Started:      Thu, 08 Oct 2026 03:22:16 +0530
+    Ready:          True
+    Restart Count:  0
+    Limits:
+      memory:  64Mi
+    Requests:
+      cpu:        20m
+      memory:     16Mi
+    Environment:  <none>
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-lzs2l (ro)
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   True 
+  Initialized                 True 
+  Ready                       True 
+  ContainersReady             True 
+  PodScheduled                True 
+Volumes:
+  kube-api-access-lzs2l:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    Optional:                false
+    DownwardAPI:             true
+QoS Class:                   Burstable
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+
+
+Name:             web-78b458b948-zfw5f
+Namespace:        default
+Priority:         0
+Service Account:  default
+Node:             minikube/192.168.49.2
+Start Time:       Thu, 08 Oct 2026 03:22:15 +0530
+Labels:           app=web
+
+$ kubectl describe svc web
+Name:                     web
+Namespace:                default
+Labels:                   <none>
+Annotations:              <none>
+Selector:                 app=web
+Type:                     ClusterIP
+IP Family Policy:         SingleStack
+IP Families:              IPv4
+IP:                       10.108.234.93
+IPs:                      10.108.234.93
+Port:                     <unset>  80/TCP
+TargetPort:               80/TCP
+Endpoints:                10.244.0.53:80,10.244.0.55:80
+Session Affinity:         None
+Internal Traffic Policy:  Cluster
+Events:                   <none>
+
+$ kubectl describe node minikube-m02 | sed -n '/Conditions:/,/Addresses:/p;/Non-terminated Pods/,/Allocated resources/p'
+Conditions:
+  Type             Status    LastHeartbeatTime                 LastTransitionTime                Reason              Message
+  ----             ------    -----------------                 ------------------                ------              -------
+  MemoryPressure   Unknown   Thu, 08 Oct 2026 00:37:41 +0530   Thu, 08 Oct 2026 00:38:53 +0530   NodeStatusUnknown   Kubelet stopped posting node status.
+  DiskPressure     Unknown   Thu, 08 Oct 2026 00:37:41 +0530   Thu, 08 Oct 2026 00:38:53 +0530   NodeStatusUnknown   Kubelet stopped posting node status.
+  PIDPressure      Unknown   Thu, 08 Oct 2026 00:37:41 +0530   Thu, 08 Oct 2026 00:38:53 +0530   NodeStatusUnknown   Kubelet stopped posting node status.
+  Ready            Unknown   Thu, 08 Oct 2026 00:37:41 +0530   Thu, 08 Oct 2026 00:38:53 +0530   NodeStatusUnknown   Kubelet stopped posting node status.
+Addresses:
+Non-terminated Pods:          (2 in total)
+  Namespace                   Name                CPU Requests  CPU Limits  Memory Requests  Memory Limits  Age
+  ---------                   ----                ------------  ----------  ---------------  -------------  ---
+  kube-system                 kindnet-rwc7g       100m (1%)     100m (1%)   50Mi (1%)        50Mi (1%)      162m
+  kube-system                 kube-proxy-cknj8    0 (0%)        0 (0%)      0 (0%)           0 (0%)         162m
+Allocated resources:
+
+# 4. kubectl logs — "what did the application say?"
+$ kubectl logs logs-demo --tail=6
+WARN slow query took 1200ms
+heartbeat 5: application is healthy
+heartbeat 6: application is healthy
+heartbeat 7: application is healthy
+heartbeat 8: application is healthy
+WARN slow query took 1200ms
+
+$ kubectl logs logs-demo --since=10s --timestamps
+2026-10-07T21:52:31.732895381Z heartbeat 6: application is healthy
+2026-10-07T21:52:34.742733466Z heartbeat 7: application is healthy
+2026-10-07T21:52:37.744642301Z heartbeat 8: application is healthy
+2026-10-07T21:52:37.744853009Z WARN slow query took 1200ms
+
+$ kubectl logs deploy/web --tail=3
+Found 2 pods, using pod/web-78b458b948-t5mtp
+2026/10/07 21:52:17 [notice] 1#1: start worker process 35
+2026/10/07 21:52:17 [notice] 1#1: start worker process 36
+2026/10/07 21:52:17 [notice] 1#1: start worker process 37
+
+$ kubectl logs -l app=web --prefix --tail=2
+[pod/web-78b458b948-t5mtp/nginx] 2026/10/07 21:52:17 [notice] 1#1: start worker process 36
+[pod/web-78b458b948-t5mtp/nginx] 2026/10/07 21:52:17 [notice] 1#1: start worker process 37
+[pod/web-78b458b948-zfw5f/nginx] 2026/10/07 21:52:17 [notice] 1#1: start worker process 37
+[pod/web-78b458b948-zfw5f/nginx] 2026/10/07 21:52:17 [notice] 1#1: start worker process 38
+
+$ kubectl logs logs-demo -c app --tail=2
+heartbeat 8: application is healthy
+WARN slow query took 1200ms
+
+# --previous (-p) reads the container that DIED — the essential flag for CrashLoopBackOff (used in Issue 1 of Task 2)
+# 5. kubectl exec — "what does the world look like from inside the container?"
+$ kubectl exec deploy/web -- nginx -v
+nginx version: nginx/1.27.5
+
+$ kubectl exec deploy/web -- cat /etc/resolv.conf
+search default.svc.cluster.local svc.cluster.local cluster.local
+nameserver 10.96.0.10
+options ndots:5
+
+$ kubectl exec deploy/web -- sh -c "wget -qO- localhost | grep -o \"<title>.*</title>\""
+<title>Welcome to nginx!</title>
+
+$ kubectl exec deploy/web -- sh -c "wget -qO- http://web.default.svc.cluster.local | grep -o \"<title>.*</title>\""
+<title>Welcome to nginx!</title>
+
+$ kubectl exec deploy/web -- env | grep -E "^(HOSTNAME|KUBERNETES_SERVICE_HOST|WEB_SERVICE_HOST)="
+HOSTNAME=web-78b458b948-t5mtp
+WEB_SERVICE_HOST=10.108.234.93
+KUBERNETES_SERVICE_HOST=10.96.0.1
+
+$ kubectl exec logs-demo -- ps
+PID   USER     TIME  COMMAND
+    1 root      0:00 sh -c echo "Application started" echo "Connecting to database..." echo "Database connection successful" i=0 while true; do i=$((i+1)); echo "heartbeat $i: application is healthy"; [ $((i % 4)) -eq 0 ] && echo "WARN slow query took 1200ms" >&2; sleep 3; done 
+    6 root      0:00 ps
+
+# images without a shell (distroless) cannot be exec-ed into — kubectl debug attaches an ephemeral container instead:
+$ kubectl debug -q $(kubectl get pod -l app=web -o name | head -1) --image=busybox:1.36 --target=nginx -- sh -c 'echo "ephemeral container in $(hostname)"; ps | head -4'
+
+$ sleep 8; kubectl logs $(kubectl get pod -l app=web -o name | head -1) -c $(kubectl get $(kubectl get pod -l app=web -o name | head -1) -o jsonpath="{.spec.ephemeralContainers[-1].name}")
+ephemeral container in web-78b458b948-t5mtp
+PID   USER     TIME  COMMAND
+    1 root      0:00 nginx: master process nginx -g daemon off;
+   30 101       0:00 nginx: worker process
+   31 101       0:00 nginx: worker process
+
+# 6. kubectl events — "what happened, in order?" (events expire after 1 hour)
+$ kubectl events --types=Normal,Warning | tail -8 | cut -c1-170
+35s                      Normal    Created                        Pod/logs-demo                         Container created
+35s                      Normal    Pulled                         Pod/logs-demo                         Container image "busybox:1.36" already present on machine and can 
+35s                      Normal    Started                        Pod/web-78b458b948-t5mtp              Container started
+35s                      Normal    Pulled                         Pod/web-78b458b948-t5mtp              Container image "nginx:1.27-alpine" already present on machine and
+35s                      Normal    Started                        Pod/logs-demo                         Container started
+8s                       Normal    Started                        Pod/web-78b458b948-t5mtp              Container started
+8s                       Normal    Created                        Pod/web-78b458b948-t5mtp              Container created
+8s                       Normal    Pulled                         Pod/web-78b458b948-t5mtp              Container image "busybox:1.36" already present on machine and can 
+
+$ kubectl events --for pod/logs-demo | cut -c1-170
+LAST SEEN   TYPE     REASON      OBJECT          MESSAGE
+162m        Normal   Scheduled   Pod/logs-demo   Successfully assigned default/logs-demo to minikube
+162m        Normal   Pulled      Pod/logs-demo   Container image "busybox:1.36" already present on machine and can be accessed by the pod
+162m        Normal   Created     Pod/logs-demo   Container created
+162m        Normal   Started     Pod/logs-demo   Container started
+19m         Normal   Killing     Pod/logs-demo   Stopping container app
+37s         Normal   Scheduled   Pod/logs-demo   Successfully assigned default/logs-demo to minikube
+36s         Normal   Pulled      Pod/logs-demo   Container image "busybox:1.36" already present on machine and can be accessed by the pod
+36s         Normal   Created     Pod/logs-demo   Container created
+36s         Normal   Started     Pod/logs-demo   Container started
+
+$ kubectl get events --sort-by=.lastTimestamp --field-selector type=Warning -A | tail -5 | cut -c1-170
+default         6m48s       Warning   Failed                         pod/shop-7f598c6967-dmgtb                      Error: ErrImagePull
+default         5m14s       Warning   Unhealthy                      pod/shop-67b55dbb98-dz4xn                      Readiness probe failed: Get "http://10.244.0.35:80/": 
+default         5m14s       Warning   Unhealthy                      pod/shop-67b55dbb98-q8wk9                      Readiness probe failed: Get "http://10.244.0.33:80/": 
+default         5m13s       Warning   Unhealthy                      pod/shop-67b55dbb98-zk6sg                      Readiness probe failed: Get "http://10.244.0.34:80/": 
+kube-system     4m47s       Warning   Unhealthy                      pod/kube-apiserver-minikube                    Readiness probe failed: HTTP probe failed with statusc
+
+# 7. kubectl explain — "what does this field mean?" (schema docs from the API server itself, matching this cluster version)
+$ kubectl explain pod.spec.containers.imagePullPolicy
+KIND:       Pod
+VERSION:    v1
+
+FIELD: imagePullPolicy <string>
+ENUM:
+    Always
+    IfNotPresent
+    Never
+
+DESCRIPTION:
+    Image pull policy. One of Always, Never, IfNotPresent. Defaults to Always if
+    :latest tag is specified, or IfNotPresent otherwise. Cannot be updated. More
+    info: https://kubernetes.io/docs/concepts/containers/images#updating-images
+    
+    Possible enum values:
+     - `"Always"` means that kubelet always attempts to pull the latest image.
+    Container will fail If the pull fails.
+     - `"IfNotPresent"` means that kubelet pulls if the image isn't present on
+    disk. Container will fail if the image isn't present and the pull fails.
+     - `"Never"` means that kubelet never pulls an image, but only uses a local
+    image. Container will fail if the image isn't present
+    
+
+
+$ kubectl explain deployment.spec.strategy.rollingUpdate.maxUnavailable
+GROUP:      apps
+KIND:       Deployment
+VERSION:    v1
+
+FIELD: maxUnavailable <IntOrString>
+
+
+DESCRIPTION:
+    The maximum number of pods that can be unavailable during the update. Value
+    can be an absolute number (ex: 5) or a percentage of desired pods (ex: 10%).
+    Absolute number is calculated from percentage by rounding down. This can not
+    be 0 if MaxSurge is 0. Defaults to 25%. Example: when this is set to 30%,
+    the old ReplicaSet can be scaled down to 70% of desired pods immediately
+    when the rolling update starts. Once new pods are ready, old ReplicaSet can
+    be scaled down further, followed by scaling up the new ReplicaSet, ensuring
+    that the total number of pods available at all times during the update is at
+    least 70% of desired pods.
+    IntOrString is a type that can hold an int32 or a string.  When used in JSON
+    or YAML marshalling and unmarshalling, it produces or consumes the inner
+    type.  This allows you to have, for example, a JSON field that can accept a
+    name or number.
+    
+
+
+$ kubectl explain pod.spec.containers.livenessProbe --recursive | head -20
+KIND:       Pod
+VERSION:    v1
+
+FIELD: livenessProbe <Probe>
+
+
+DESCRIPTION:
+    Periodic probe of container liveness. Container will be restarted if the
+    probe fails. Cannot be updated. More info:
+    https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes
+    Probe describes a health check to be performed against a container to
+    determine whether it is alive or ready to receive traffic.
+    
+FIELDS:
+  exec	<ExecAction>
+    command	<[]string>
+  failureThreshold	<integer>
+  grpc	<GRPCAction>
+    mode	<string>
+    enum: Plaintext, TLS
+
+# 8. kubectl top — "who is using the resources?" (needs metrics-server)
+$ kubectl top nodes
+NAME           CPU(cores)   CPU(%)      MEMORY(bytes)   MEMORY(%)   
+minikube       595m         7%          1212Mi          30%         
+minikube-m02   <unknown>    <unknown>   <unknown>       <unknown>   
+
+$ kubectl top pods
+error: metrics not available yet
+
+$ kubectl top pods -A --sort-by=memory | head -6
+NAMESPACE       NAME                                       CPU(cores)   MEMORY(bytes)   
+kube-system     kube-apiserver-minikube                    159m         366Mi           
+kube-system     kube-controller-manager-minikube           47m          119Mi           
+ingress-nginx   ingress-nginx-controller-d7cd8c989-gvnsv   26m          107Mi           
+kube-system     etcd-minikube                              67m          66Mi            
+kube-system     kube-scheduler-minikube                    30m          57Mi            
+
+$ kubectl top pod -l app=web --containers
+error: metrics not available yet
+
+$ kubectl delete -f demo-app.yaml
+deployment.apps "web" deleted from default namespace
+service "web" deleted from default namespace
+pod "logs-demo" deleted from default namespace
+

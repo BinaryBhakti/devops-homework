@@ -1,0 +1,13 @@
+# Fix: create the ConfigMap the pod depends on. (The pod itself is unchanged; the kubelet
+# retries the mount and proceeds on its own.)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-site-config
+data:
+  default.conf: |
+    server {
+      listen 80;
+      listen [::]:80;   # second fix: without it, "localhost" (::1 first) is refused — see the README
+      location / { return 200 "served with config from nginx-site-config\n"; }
+    }

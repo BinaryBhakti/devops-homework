@@ -1,0 +1,69 @@
+########## ISSUE 1 — CrashLoopBackOff ##########
+
+# BEFORE
+$ kubectl apply -f broken.yaml
+pod/crashloop-pod created
+
+$ kubectl wait pod/crashloop-pod --for=jsonpath={.status.containerStatuses[0].state.waiting.reason}=CrashLoopBackOff --timeout=120s; kubectl get pod crashloop-pod
+pod/crashloop-pod condition met
+NAME            READY   STATUS             RESTARTS      AGE
+crashloop-pod   0/1     CrashLoopBackOff   1 (16s ago)   31s
+
+# IDENTIFY — RESTARTS climbing + CrashLoopBackOff = the container starts, then exits. Why did it exit?
+$ kubectl get pod crashloop-pod -o jsonpath='{.status.containerStatuses[0].lastState.terminated}' ; echo
+{"containerID":"containerd://dd581b247a8f6656c2608b3f4633dfac388efa8aceb5bcc91b6269b5dd1a85d5","exitCode":1,"finishedAt":"2026-10-07T21:53:40Z","reason":"Error","startedAt":"2026-10-07T21:53:40Z"}
+
+# INVESTIGATE — exit code 1 with reason Error: the process chose to exit. Read what it said (the container that died, not the waiting one)
+$ kubectl logs crashloop-pod --previous
+[FATAL ERROR]: DATABASE_URL environment variable is MISSING!
+
+$ kubectl get events --field-selector involvedObject.name=crashloop-pod -o custom-columns=REASON:.reason,COUNT:.count,MESSAGE:.message | cut -c1-140
+REASON      COUNT    MESSAGE
+Scheduled   <none>   Successfully assigned default/crashloop-pod to minikube
+Pulling     1        Pulling image "python:3.11-alpine"
+Pulled      1        Successfully pulled image "python:3.11-alpine" in 12.316s (12.317s including waiting). Image size: 23808448 bytes.
+Created     3        Container created
+Started     3        Container started
+Pulled      2        Container image "python:3.11-alpine" already present on machine and can be accessed by the pod
+BackOff     2        Back-off restarting failed container python-app in pod crashloop-pod_default(0e8eebfd-c9e0-4373-a296-7ecdf67b03f1)
+
+$ kubectl get pod crashloop-pod -o jsonpath='{.spec.containers[0].env}{.spec.containers[0].envFrom}' ; echo '(no env, no envFrom)'
+(no env, no envFrom)
+
+# ROOT CAUSE: the app requires DATABASE_URL and the pod spec provides no environment at all. Kubernetes is doing its job — restarting with exponential back-off (10s, 20s, 40s ... 5m).
+# FIX — supply the config from a ConfigMap. Pod env is immutable, so the pod is replaced
+$ diff broken.yaml fixed.yaml
+1c1
+< # Course scenario 1: the app refuses to start without DATABASE_URL — and nobody gave it one.
+---
+> # Fix: provide the configuration the app requires, from a ConfigMap.
+2a3,9
+> kind: ConfigMap
+> metadata:
+>   name: crashloop-config
+> data:
+>   DATABASE_URL: postgresql://yatri_admin@postgres:5432/yatri_production_db
+> ---
+> apiVersion: v1
+10a18,19
+>       envFrom:
+>         - configMapRef: { name: crashloop-config }
+
+$ kubectl delete pod crashloop-pod --wait=true && kubectl apply -f fixed.yaml
+pod "crashloop-pod" deleted from default namespace
+configmap/crashloop-config created
+pod/crashloop-pod created
+
+# VERIFY
+$ kubectl wait pod/crashloop-pod --for=condition=Ready --timeout=120s && kubectl get pod crashloop-pod
+pod/crashloop-pod condition met
+NAME            READY   STATUS    RESTARTS   AGE
+crashloop-pod   1/1     Running   0          4s
+
+$ kubectl logs crashloop-pod
+Application started successfully! db=postgresql://yatri_admin@postgres:5432/yatri_production_db
+
+$ kubectl delete -f fixed.yaml
+configmap "crashloop-config" deleted from default namespace
+pod "crashloop-pod" deleted from default namespace
+

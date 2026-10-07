@@ -1,0 +1,11 @@
+# Course scenario 2: the REPOSITORY does not exist on Docker Hub (an internal image name
+# referenced without its private registry prefix).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: errimagepull-pod
+  labels: { tier: triage }
+spec:
+  containers:
+    - name: web-app
+      image: yatri-api-service:v999-invalid-tag-does-not-exist

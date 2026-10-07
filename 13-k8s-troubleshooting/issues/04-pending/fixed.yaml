@@ -1,0 +1,13 @@
+# Fix: requests sized to what the app actually uses (measured with kubectl top), with limits.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pending-pod
+  labels: { tier: triage }
+spec:
+  containers:
+    - name: hungry-app
+      image: nginx:alpine
+      resources:
+        requests: { cpu: 50m, memory: 32Mi }
+        limits: { memory: 128Mi }

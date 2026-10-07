@@ -1,0 +1,102 @@
+########## ISSUE 7 — DNS (short name across namespaces) ##########
+
+# BEFORE
+$ kubectl apply -f setup.yaml && kubectl -n backend rollout status deploy/api --timeout=120s
+namespace/backend created
+namespace/frontend created
+deployment.apps/api created
+service/api created
+Waiting for deployment "api" rollout to finish: 0 of 1 updated replicas are available...
+deployment "api" successfully rolled out
+
+$ kubectl apply -f broken-client.yaml && kubectl -n frontend wait pod/web-client --for=condition=Ready --timeout=120s && sleep 12
+pod/web-client created
+pod/web-client condition met
+
+$ kubectl -n frontend logs web-client --tail=3
+21:58:20
+ [HTTP 000]
+curl failed: exit 6
+
+# IDENTIFY — curl exit 6 = "could not resolve host". This is DNS, not routing
+# INVESTIGATE — is cluster DNS itself healthy?
+$ kubectl -n kube-system get pods -l k8s-app=kube-dns
+NAME                       READY   STATUS    RESTARTS        AGE
+coredns-559f6c778d-gndv7   1/1     Running   25 (176m ago)   19d
+
+$ kubectl -n frontend exec web-client -- nslookup kubernetes.default
+Server:		10.96.0.10
+Address:	10.96.0.10:53
+
+Non-authoritative answer:
+
+** server can't find kubernetes.default: NXDOMAIN
+
+command terminated with exit code 1
+
+# DNS works. So what does the client search for when it asks for "api"?
+$ kubectl -n frontend exec web-client -- cat /etc/resolv.conf
+search frontend.svc.cluster.local svc.cluster.local cluster.local
+nameserver 10.96.0.10
+options ndots:5
+
+$ kubectl -n frontend exec web-client -- nslookup api
+Server:		10.96.0.10
+Address:	10.96.0.10:53
+
+** server can't find api.cluster.local: NXDOMAIN
+
+** server can't find api.frontend.svc.cluster.local: NXDOMAIN
+
+** server can't find api.svc.cluster.local: NXDOMAIN
+
+** server can't find api.svc.cluster.local: NXDOMAIN
+
+** server can't find api.cluster.local: NXDOMAIN
+
+** server can't find api.frontend.svc.cluster.local: NXDOMAIN
+
+command terminated with exit code 1
+
+$ kubectl get svc -A --field-selector metadata.name=api
+NAMESPACE   NAME   TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
+backend     api    ClusterIP   10.109.15.43   <none>        80/TCP    17s
+
+# ROOT CAUSE: "api" is expanded with the CLIENT namespace first (api.frontend.svc.cluster.local). The Service lives in "backend". A short name only works within one namespace.
+$ kubectl -n frontend exec web-client -- nslookup api.backend.svc.cluster.local
+Server:		10.96.0.10
+Address:	10.96.0.10:53
+
+
+Name:	api.backend.svc.cluster.local
+Address: 10.109.15.43
+
+
+$ diff broken-client.yaml fixed-client.yaml
+1c1
+< # The client calls "http://api" — a short name that only resolves inside the SAME namespace.
+---
+> # Fix: the service name qualified with its namespace (FQDN, so no search-list guessing).
+9c9
+<       env: [{ name: API_URL, value: "http://api" }]
+---
+>       env: [{ name: API_URL, value: "http://api.backend.svc.cluster.local" }]
+
+$ kubectl delete -f broken-client.yaml --wait=true && kubectl apply -f fixed-client.yaml && kubectl -n frontend wait pod/web-client --for=condition=Ready --timeout=120s && sleep 12
+pod "web-client" deleted from frontend namespace
+pod/web-client created
+pod/web-client condition met
+
+# VERIFY
+$ kubectl -n frontend logs web-client --tail=3
+21:59:05
+api in namespace backend
+ [HTTP 200]
+
+$ kubectl delete -f fixed-client.yaml -f setup.yaml
+pod "web-client" deleted from frontend namespace
+namespace "backend" deleted
+namespace "frontend" deleted
+deployment.apps "api" deleted from backend namespace
+service "api" deleted from backend namespace
+

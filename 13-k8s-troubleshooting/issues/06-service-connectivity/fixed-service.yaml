@@ -1,0 +1,11 @@
+# Fix: selector copied from the pod template labels; targetPort by NAME, so it follows the
+# container port if that ever changes.
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-svc
+spec:
+  selector: { app: orders }
+  ports:
+    - port: 80
+      targetPort: http

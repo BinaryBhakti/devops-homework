@@ -1,0 +1,53 @@
+########## ISSUE 10 — OOMKilled ##########
+
+# BEFORE
+$ kubectl apply -f broken.yaml
+pod/oomkilled-pod created
+
+$ kubectl wait pod/oomkilled-pod --for=jsonpath={.status.containerStatuses[0].lastState.terminated.reason}=OOMKilled --timeout=120s; kubectl get pod oomkilled-pod
+pod/oomkilled-pod condition met
+NAME            READY   STATUS    RESTARTS     AGE
+oomkilled-pod   1/1     Running   1 (2s ago)   2s
+
+# IDENTIFY — the STATUS column may say OOMKilled or CrashLoopBackOff depending on the instant; the last terminated state is unambiguous
+$ kubectl get pod oomkilled-pod -o jsonpath='{.status.containerStatuses[0].lastState.terminated}'; echo
+{"containerID":"containerd://e8a12fab5dea5aab10679c03711b0ffde84227ed9df39fdbafa51df5288273ac","exitCode":137,"finishedAt":"2026-10-07T22:01:19Z","reason":"OOMKilled","startedAt":"2026-10-07T22:01:19Z"}
+
+# exit 137 = 128 + 9 (SIGKILL) from the kernel OOM killer — the app never got to log an error
+$ kubectl logs oomkilled-pod --previous
+Allocating memory rapidly...
+
+$ kubectl get pod oomkilled-pod -o jsonpath='limit: {.spec.containers[0].resources.limits.memory}'; echo
+limit: 20Mi
+
+# ROOT CAUSE: the process holds ~200 MiB; the cgroup limit is 20Mi. (In real life: either the limit is wrong or the code leaks — measure before choosing.)
+$ diff broken.yaml fixed.yaml
+1c1
+< # Course scenario 5: allocates ~200 MiB under a 20Mi limit.
+---
+> # Fix: a limit sized to the measured working set plus headroom (the real fix for a leak is the code).
+22c22
+<           memory: "20Mi"
+---
+>           memory: "320Mi"
+
+$ kubectl delete pod oomkilled-pod --wait=true && kubectl apply -f fixed.yaml
+pod "oomkilled-pod" deleted from default namespace
+pod/oomkilled-pod created
+
+# VERIFY
+$ kubectl wait pod/oomkilled-pod --for=condition=Ready --timeout=120s && sleep 20 && kubectl get pod oomkilled-pod
+pod/oomkilled-pod condition met
+NAME            READY   STATUS    RESTARTS   AGE
+oomkilled-pod   1/1     Running   0          21s
+
+$ kubectl logs oomkilled-pod
+Allocating memory rapidly...
+holding 200 MiB
+
+$ kubectl top pod oomkilled-pod
+Error from server (NotFound): podmetrics.metrics.k8s.io "default/oomkilled-pod" not found
+
+$ kubectl delete -f fixed.yaml
+pod "oomkilled-pod" deleted from default namespace
+

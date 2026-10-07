@@ -1,0 +1,14 @@
+# Course scenario 3: requests 500 CPUs and 1000Gi of memory. No node can ever fit it.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pending-pod
+  labels: { tier: triage }
+spec:
+  containers:
+    - name: hungry-app
+      image: nginx:alpine
+      resources:
+        requests:
+          cpu: "500"
+          memory: "1000Gi"

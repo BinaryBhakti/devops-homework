@@ -1,0 +1,24 @@
+# Fix: reference the key that actually exists in the Secret.
+apiVersion: v1
+kind: Secret
+metadata: { name: payments-db }
+type: Opaque
+stringData:
+  username: payments
+  password: s3cr3t-payments
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: payments-pod
+  labels: { tier: triage }
+spec:
+  containers:
+    - name: payments
+      image: busybox:1.36
+      command: ["sh", "-c", "echo payments started as $DB_USER; sleep 3600"]
+      env:
+        - name: DB_USER
+          valueFrom: { secretKeyRef: { name: payments-db, key: username } }
+        - name: DB_PASSWORD
+          valueFrom: { secretKeyRef: { name: payments-db, key: password } }

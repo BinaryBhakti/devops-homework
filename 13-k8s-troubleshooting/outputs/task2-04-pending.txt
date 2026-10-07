@@ -1,0 +1,63 @@
+########## ISSUE 4 — Pending (unschedulable) ##########
+
+# BEFORE
+$ kubectl apply -f broken.yaml
+pod/pending-pod created
+
+$ sleep 5; kubectl get pod pending-pod -o wide
+NAME          READY   STATUS    RESTARTS   AGE   IP       NODE     NOMINATED NODE   READINESS GATES
+pending-pod   0/1     Pending   0          5s    <none>   <none>   <none>           <none>
+
+# IDENTIFY — no NODE column value: the scheduler never placed it. Pending is a scheduling problem, not a container problem (no logs exist)
+$ kubectl logs pending-pod
+
+$ kubectl describe pod pending-pod | sed -n '/^Events:/,$p' | cut -c1-260
+Events:
+  Type     Reason            Age   From               Message
+  ----     ------            ----  ----               -------
+  Warning  FailedScheduling  5s    default-scheduler  0/2 nodes are available: 1 Insufficient cpu, 1 Insufficient memory, 1 node(s) had untolerated taint(s). preemption: 0/2 nodes are available: 2 Preemption is not helpful for scheduling.
+
+# INVESTIGATE — what can the nodes actually offer?
+$ kubectl get nodes -o custom-columns=NODE:.metadata.name,CPU:.status.allocatable.cpu,MEMORY:.status.allocatable.memory
+NODE           CPU   MEMORY
+minikube       8     4010356Ki
+minikube-m02   8     4010356Ki
+
+$ kubectl describe node minikube | sed -n '/Allocated resources/,/memory /p'
+Allocated resources:
+  (Total limits may be over 100 percent, i.e., overcommitted.)
+  Resource           Requests     Limits
+  --------           --------     ------
+  cpu                1050m (13%)  100m (1%)
+  memory             510Mi (13%)  220Mi (5%)
+
+# ROOT CAUSE: requests of 500 CPUs / 1000Gi; the largest node has 8 CPUs / ~3.8Gi. Requests are a reservation — the scheduler will never place a pod no node can hold.
+$ diff broken.yaml fixed.yaml
+1c1
+< # Course scenario 3: requests 500 CPUs and 1000Gi of memory. No node can ever fit it.
+---
+> # Fix: requests sized to what the app actually uses (measured with kubectl top), with limits.
+12,14c12,13
+<         requests:
+<           cpu: "500"
+<           memory: "1000Gi"
+---
+>         requests: { cpu: 50m, memory: 32Mi }
+>         limits: { memory: 128Mi }
+
+$ kubectl delete pod pending-pod --wait=true && kubectl apply -f fixed.yaml
+pod "pending-pod" deleted from default namespace
+pod/pending-pod created
+
+# VERIFY
+$ kubectl wait pod/pending-pod --for=condition=Ready --timeout=120s && kubectl get pod pending-pod -o wide
+pod/pending-pod condition met
+NAME          READY   STATUS    RESTARTS   AGE   IP            NODE       NOMINATED NODE   READINESS GATES
+pending-pod   1/1     Running   0          10s   10.244.0.62   minikube   <none>           <none>
+
+$ kubectl get events --field-selector involvedObject.name=pending-pod --sort-by=.lastTimestamp -o custom-columns=REASON:.reason,MESSAGE:.message | grep -E 'Scheduled' | cut -c1-140
+Scheduled          Successfully assigned default/pending-pod to minikube
+
+$ kubectl delete pod pending-pod
+pod "pending-pod" deleted from default namespace
+

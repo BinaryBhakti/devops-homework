@@ -1,0 +1,112 @@
+########## ISSUE 5 — stuck in ContainerCreating ##########
+
+# BEFORE
+$ kubectl apply -f broken.yaml
+pod/containercreating-pod created
+
+$ sleep 45; kubectl get pod containercreating-pod -o wide
+NAME                    READY   STATUS              RESTARTS   AGE   IP       NODE       NOMINATED NODE   READINESS GATES
+containercreating-pod   0/1     ContainerCreating   0          46s   <none>   minikube   <none>           <none>
+
+# IDENTIFY — it HAS a node (unlike Pending) but no container after 45 s. The kubelet is stuck preparing something
+$ kubectl logs containercreating-pod
+Error from server (BadRequest): container "web" in pod "containercreating-pod" is waiting to start: ContainerCreating
+
+$ kubectl describe pod containercreating-pod | sed -n '/^Events:/,$p' | cut -c1-200
+Events:
+  Type     Reason       Age                From               Message
+  ----     ------       ----               ----               -------
+  Normal   Scheduled    45s                default-scheduler  Successfully assigned default/containercreating-pod to minikube
+  Warning  FailedMount  14s (x7 over 46s)  kubelet            MountVolume.SetUp failed for volume "site-config" : configmap "nginx-site-config" not found
+
+# INVESTIGATE
+$ kubectl get configmap nginx-site-config
+Error from server (NotFound): configmaps "nginx-site-config" not found
+
+# ROOT CAUSE: the pod mounts ConfigMap nginx-site-config, which does not exist. The kubelet retries the mount (FailedMount) forever; the container cannot be created without its volumes.
+# FIX — create the missing ConfigMap; the pod itself is not touched
+$ cat fixed.yaml
+# Fix: create the ConfigMap the pod depends on. (The pod itself is unchanged; the kubelet
+# retries the mount and proceeds on its own.)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-site-config
+data:
+  default.conf: |
+    server {
+      listen 80;
+      location / { return 200 "served with config from nginx-site-config\n"; }
+    }
+
+$ kubectl apply -f fixed.yaml
+configmap/nginx-site-config created
+
+# VERIFY — the kubelet retries the mount on its own (it can take up to ~2 minutes to notice)
+$ kubectl wait pod/containercreating-pod --for=condition=Ready --timeout=240s && kubectl get pod containercreating-pod
+pod/containercreating-pod condition met
+NAME                    READY   STATUS    RESTARTS   AGE
+containercreating-pod   1/1     Running   0          65s
+
+$ kubectl exec containercreating-pod -- wget -qO- localhost
+wget: can't connect to remote host: Connection refused
+command terminated with exit code 1
+
+$ kubectl delete pod containercreating-pod && kubectl delete -f fixed.yaml
+pod "containercreating-pod" deleted from default namespace
+configmap "nginx-site-config" deleted from default namespace
+
+########## FOLLOW-UP — the pod was Running, but "wget localhost" was refused. A second, independent bug behind the first ##########
+
+$ kubectl apply -f 05-containercreating/broken.yaml && git -C .. show HEAD:13-k8s-troubleshooting/issues/05-containercreating/fixed.yaml 2>/dev/null | kubectl apply -f - 2>/dev/null || sed "/listen \[::\]:80/d" 05-containercreating/fixed.yaml | kubectl apply -f -
+pod/containercreating-pod created
+configmap/nginx-site-config created
+
+$ kubectl wait pod/containercreating-pod --for=condition=Ready --timeout=240s
+pod/containercreating-pod condition met
+
+$ kubectl exec containercreating-pod -- wget -qO- localhost; echo "exit: $?"
+wget: can't connect to remote host: Connection refused
+command terminated with exit code 1
+exit: 1
+
+$ kubectl exec containercreating-pod -- wget -qO- 127.0.0.1; echo "exit: $?"
+served with config from nginx-site-config
+exit: 0
+
+# works on 127.0.0.1, refused on "localhost": what does localhost resolve to, and what is nginx listening on?
+$ kubectl exec containercreating-pod -- grep localhost /etc/hosts
+127.0.0.1	localhost
+::1	localhost ip6-localhost ip6-loopback
+
+$ kubectl exec containercreating-pod -- netstat -tln
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       
+tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN      
+
+# ROOT CAUSE: busybox wget tries ::1 first; the ConfigMap replaced nginx default.conf (which has "listen [::]:80") with one that only listens on IPv4.
+# FIX: listen on both families
+$ diff <(sed "/listen \[::\]:80/d" 05-containercreating/fixed.yaml) 05-containercreating/fixed.yaml
+10a11
+>       listen [::]:80;   # second fix: without it, "localhost" (::1 first) is refused — see the README
+
+$ kubectl apply -f 05-containercreating/fixed.yaml && kubectl delete pod containercreating-pod --wait=true && kubectl apply -f 05-containercreating/broken.yaml && kubectl wait pod/containercreating-pod --for=condition=Ready --timeout=240s
+configmap/nginx-site-config configured
+pod "containercreating-pod" deleted from default namespace
+pod/containercreating-pod created
+pod/containercreating-pod condition met
+
+$ kubectl exec containercreating-pod -- netstat -tln
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       
+tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN      
+tcp        0      0 :::80                   :::*                    LISTEN      
+
+$ kubectl exec containercreating-pod -- wget -qO- localhost; echo "exit: $?"
+served with config from nginx-site-config
+exit: 0
+
+$ kubectl delete pod containercreating-pod && kubectl delete -f 05-containercreating/fixed.yaml
+pod "containercreating-pod" deleted from default namespace
+configmap "nginx-site-config" deleted from default namespace
+
