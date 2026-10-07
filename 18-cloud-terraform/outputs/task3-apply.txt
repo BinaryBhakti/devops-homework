@@ -1,0 +1,51 @@
+########## TASK 3 — terraform apply (watch the order resources are created in) ##########
+
+$ terraform apply -no-color infra.tfplan
+random_id.bucket_suffix: Creating...
+random_id.bucket_suffix: Creation complete after 0s [id=XiPboQ]
+aws_vpc.main: Creating...
+aws_iam_role.web: Creating...
+aws_s3_bucket.site: Creating...
+aws_iam_role.web: Creation complete after 6s [id=session19-web-role]
+aws_iam_instance_profile.web: Creating...
+aws_s3_bucket.site: Creation complete after 8s [id=session19-site-5e23dba1]
+aws_s3_bucket_public_access_block.site: Creating...
+aws_s3_bucket_versioning.site: Creating...
+aws_iam_role_policy.read_site: Creating...
+aws_s3_object.index: Creating...
+aws_vpc.main: Creation complete after 8s [id=vpc-c2c1b37a6c45ad588]
+aws_internet_gateway.main: Creating...
+aws_subnet.public: Creating...
+aws_security_group.web: Creating...
+aws_s3_bucket_public_access_block.site: Creation complete after 2s [id=session19-site-5e23dba1]
+aws_iam_role_policy.read_site: Creation complete after 2s [id=session19-web-role:read-site-bucket]
+aws_s3_object.index: Creation complete after 2s [id=session19-site-5e23dba1/site/index.html]
+aws_internet_gateway.main: Creation complete after 3s [id=igw-5435a6826c328d71b]
+aws_route_table.public: Creating...
+aws_s3_bucket_versioning.site: Creation complete after 3s [id=session19-site-5e23dba1]
+aws_route_table.public: Creation complete after 0s [id=rtb-2db6721bfb4f0a7c6]
+aws_security_group.web: Creation complete after 4s [id=sg-0090ae80b9b8874bb]
+aws_iam_instance_profile.web: Creation complete after 7s [id=session19-web-profile]
+aws_subnet.public: Still creating... [00m10s elapsed]
+aws_subnet.public: Creation complete after 16s [id=subnet-193bcc5cb706c7c2d]
+aws_route_table_association.public: Creating...
+aws_route_table_association.public: Creation complete after 1s [id=rtbassoc-4c337beac725177cf]
+aws_instance.web: Creating...
+aws_instance.web: Still creating... [00m10s elapsed]
+aws_instance.web: Creation complete after 16s [id=i-5b36c93cf7bf4ac58]
+
+Apply complete! Resources: 15 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+ami_id = "ami-760aaa0f"
+instance_id = "i-5b36c93cf7bf4ac58"
+instance_private_ip = "10.20.1.4"
+instance_public_ip = "54.214.120.205"
+internet_gateway_id = "igw-5435a6826c328d71b"
+public_subnet_id = "subnet-193bcc5cb706c7c2d"
+security_group_id = "sg-0090ae80b9b8874bb"
+site_bucket = "session19-site-5e23dba1"
+vpc_cidr = "10.20.0.0/16"
+vpc_id = "vpc-c2c1b37a6c45ad588"
+

@@ -1,0 +1,59 @@
+########## TASK 1 — providers: terraform init, fmt, validate ##########
+
+$ ls -1
+compute.tf
+network.tf
+outputs.tf
+provider.tf
+security.tf
+storage.tf
+terraform.tfvars
+variables.tf
+versions.tf
+
+$ terraform init -no-color
+Initializing the backend...
+
+Initializing provider plugins...
+- Finding hashicorp/aws versions matching "~> 6.0"...
+- Finding hashicorp/random versions matching "~> 3.6"...
+- Installing hashicorp/aws v6.67.0...
+- Installed hashicorp/aws v6.67.0 (signed by HashiCorp)
+- Installing hashicorp/random v3.9.1...
+- Installed hashicorp/random v3.9.1 (signed by HashiCorp)
+
+Terraform has created a lock file .terraform.lock.hcl to record the provider
+selections it made above. Include this file in your version control repository
+so that Terraform can guarantee to make the same selections by default when
+you run "terraform init" in the future.
+
+Terraform has been successfully initialized!
+
+$ terraform providers -no-color
+
+Providers required by configuration:
+.
+├── provider[registry.terraform.io/hashicorp/aws] ~> 6.0
+└── provider[registry.terraform.io/hashicorp/random] ~> 3.6
+
+
+$ terraform fmt -check -recursive; echo "fmt exit code: $?"
+fmt exit code: 0
+
+$ terraform validate -no-color
+Success! The configuration is valid.
+
+
+# variable validation rejects a bad CIDR before any API call is made
+$ terraform plan -no-color -var="vpc_cidr=10.20.0.0/33" 2>&1 | sed -n "/Error/,\$p"
+Error: Invalid value for variable
+
+  on variables.tf line 19:
+  19: variable "vpc_cidr" {
+    ├────────────────
+    │ var.vpc_cidr is "10.20.0.0/33"
+
+vpc_cidr must be a valid IPv4 CIDR block, e.g. 10.20.0.0/16.
+
+This was checked by the validation rule at variables.tf:24,3-13.
+

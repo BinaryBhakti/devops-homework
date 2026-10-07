@@ -1,0 +1,58 @@
+########## TASK 7 — terraform destroy (reverse dependency order) ##########
+
+$ terraform plan -destroy -no-color | grep -E "^Plan:"
+Plan: 0 to add, 0 to change, 15 to destroy.
+
+$ terraform destroy -no-color -auto-approve | grep -E "Destroying|Destruction complete|Destroy complete"
+aws_s3_bucket_versioning.site: Destroying... [id=session19-site-5e23dba1]
+aws_instance.web: Destroying... [id=i-5b36c93cf7bf4ac58]
+aws_s3_bucket_public_access_block.site: Destroying... [id=session19-site-5e23dba1]
+aws_s3_bucket_versioning.site: Destruction complete after 0s
+aws_s3_bucket_public_access_block.site: Destruction complete after 0s
+aws_instance.web: Destruction complete after 11s
+aws_route_table_association.public: Destroying... [id=rtbassoc-4c337beac725177cf]
+aws_iam_role_policy.read_site: Destroying... [id=session19-web-role:read-site-bucket]
+aws_iam_instance_profile.web: Destroying... [id=session19-web-profile]
+aws_s3_object.index: Destroying... [id=session19-site-5e23dba1/site/index.html]
+aws_security_group.web: Destroying... [id=sg-0090ae80b9b8874bb]
+aws_iam_role_policy.read_site: Destruction complete after 1s
+aws_iam_instance_profile.web: Destruction complete after 1s
+aws_iam_role.web: Destroying... [id=session19-web-role]
+aws_route_table_association.public: Destruction complete after 1s
+aws_route_table.public: Destroying... [id=rtb-2db6721bfb4f0a7c6]
+aws_subnet.public: Destroying... [id=subnet-193bcc5cb706c7c2d]
+aws_iam_role.web: Destruction complete after 0s
+aws_s3_object.index: Destruction complete after 1s
+aws_s3_bucket.site: Destroying... [id=session19-site-5e23dba1]
+aws_subnet.public: Destruction complete after 0s
+aws_security_group.web: Destruction complete after 2s
+aws_s3_bucket.site: Destruction complete after 1s
+aws_route_table.public: Destruction complete after 1s
+aws_internet_gateway.main: Destroying... [id=igw-5435a6826c328d71b]
+random_id.bucket_suffix: Destroying... [id=XiPboQ]
+random_id.bucket_suffix: Destruction complete after 0s
+aws_internet_gateway.main: Destruction complete after 0s
+aws_vpc.main: Destroying... [id=vpc-c2c1b37a6c45ad588]
+aws_vpc.main: Destruction complete after 0s
+Destroy complete! Resources: 15 destroyed.
+
+# verify through the API that nothing is left
+$ awslocal --region ap-south-1 ec2 describe-vpcs --vpc-ids vpc-c2c1b37a6c45ad588 2>&1 | tail -1
+An error occurred (InvalidVpcID.NotFound) when calling the DescribeVpcs operation: VpcID {'vpc-c2c1b37a6c45ad588'} does not exist.
+
+$ awslocal --region ap-south-1 ec2 describe-instances --instance-ids i-5b36c93cf7bf4ac58 --query 'Reservations[].Instances[].State.Name' --output text
+terminated
+
+$ awslocal --region ap-south-1 ec2 describe-vpcs --filters Name=tag:Project,Values=session19 --query 'length(Vpcs)'
+0
+
+$ awslocal --region ap-south-1 iam get-role --role-name session19-web-role 2>&1 | tail -1
+An error occurred (NoSuchEntity) when calling the GetRole operation: Role session19-web-role not found
+
+$ awslocal --region ap-south-1 s3 ls | grep -c session19-site-5e23dba1; echo '(0 matching buckets)'
+0
+(0 matching buckets)
+
+$ terraform state list | wc -l
+       0
+

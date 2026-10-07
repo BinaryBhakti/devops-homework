@@ -1,0 +1,123 @@
+########## TASK 4 — verify every resource through the AWS (LocalStack) API ##########
+
+$ awslocal --region ap-south-1 ec2 describe-vpcs --vpc-ids $(terraform output -raw vpc_id) --query 'Vpcs[].{Id:VpcId,Cidr:CidrBlock,State:State,Name:Tags[?Key==`Name`]|[0].Value}' --output table
+-------------------------------------------------------------------------
+|                             DescribeVpcs                              |
++--------------+-------------------------+----------------+-------------+
+|     Cidr     |           Id            |     Name       |    State    |
++--------------+-------------------------+----------------+-------------+
+|  10.20.0.0/16|  vpc-c2c1b37a6c45ad588  |  session19-vpc |  available  |
++--------------+-------------------------+----------------+-------------+
+
+$ awslocal --region ap-south-1 ec2 describe-subnets --subnet-ids $(terraform output -raw public_subnet_id) --query 'Subnets[].{Id:SubnetId,Cidr:CidrBlock,AZ:AvailabilityZone,PublicIpOnLaunch:MapPublicIpOnLaunch,FreeIPs:AvailableIpAddressCount}' --output table
+--------------------------------------------------
+|                 DescribeSubnets                |
++-------------------+----------------------------+
+|  AZ               |  ap-south-1a               |
+|  Cidr             |  10.20.1.0/24              |
+|  FreeIPs          |  250                       |
+|  Id               |  subnet-193bcc5cb706c7c2d  |
+|  PublicIpOnLaunch |  True                      |
++-------------------+----------------------------+
+
+$ awslocal --region ap-south-1 ec2 describe-internet-gateways --internet-gateway-ids $(terraform output -raw internet_gateway_id) --query 'InternetGateways[].Attachments[]' --output table
+----------------------------------------
+|       DescribeInternetGateways       |
++------------+-------------------------+
+|    State   |          VpcId          |
++------------+-------------------------+
+|  available |  vpc-c2c1b37a6c45ad588  |
++------------+-------------------------+
+
+$ awslocal --region ap-south-1 ec2 describe-route-tables --filters Name=vpc-id,Values=$(terraform output -raw vpc_id) --query 'RouteTables[].{Main:Associations[0].Main,Subnet:Associations[0].SubnetId,Routes:Routes[].[DestinationCidrBlock,GatewayId]}' --output json
+[
+    {
+        "Main": true,
+        "Subnet": null,
+        "Routes": [
+            [
+                "10.20.0.0/16",
+                "local"
+            ]
+        ]
+    },
+    {
+        "Main": false,
+        "Subnet": "subnet-193bcc5cb706c7c2d",
+        "Routes": [
+            [
+                "10.20.0.0/16",
+                "local"
+            ],
+            [
+                "0.0.0.0/0",
+                "igw-5435a6826c328d71b"
+            ]
+        ]
+    }
+]
+
+$ awslocal --region ap-south-1 ec2 describe-security-groups --group-ids $(terraform output -raw security_group_id) --query 'SecurityGroups[].IpPermissions[].{Port:FromPort,Proto:IpProtocol,From:IpRanges[0].CidrIp,Why:IpRanges[0].Description}' --output table
+--------------------------------------------------------------------
+|                      DescribeSecurityGroups                      |
++------------------+-------+--------+------------------------------+
+|       From       | Port  | Proto  |             Why              |
++------------------+-------+--------+------------------------------+
+|  0.0.0.0/0       |  80   |  tcp   |  HTTP                        |
+|  0.0.0.0/0       |  443  |  tcp   |  HTTPS                       |
+|  203.0.113.10/32 |  22   |  tcp   |  SSH from the admin address  |
++------------------+-------+--------+------------------------------+
+
+$ awslocal --region ap-south-1 ec2 describe-instances --instance-ids $(terraform output -raw instance_id) --query 'Reservations[].Instances[].{Id:InstanceId,State:State.Name,Type:InstanceType,AMI:ImageId,Subnet:SubnetId,PrivateIp:PrivateIpAddress,PublicIp:PublicIpAddress,Profile:IamInstanceProfile.Arn}' --output json
+[
+    {
+        "Id": "i-5b36c93cf7bf4ac58",
+        "State": "running",
+        "Type": "t3.micro",
+        "AMI": "ami-760aaa0f",
+        "Subnet": "subnet-193bcc5cb706c7c2d",
+        "PrivateIp": "10.20.1.4",
+        "PublicIp": "54.214.120.205",
+        "Profile": "arn:aws:iam::000000000000:instance-profile/session19-web-profile"
+    }
+]
+
+$ awslocal --region ap-south-1 ec2 describe-instance-attribute --instance-id $(terraform output -raw instance_id) --attribute userData --query UserData.Value --output text | base64 --decode
+#!/bin/bash
+yum install -y httpd
+aws s3 cp s3://session19-site-5e23dba1/site/index.html /var/www/html/index.html
+systemctl enable --now httpd
+
+$ awslocal --region ap-south-1 iam get-role-policy --role-name session19-web-role --policy-name read-site-bucket --query PolicyDocument
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Action": [
+                "s3:GetObject"
+            ],
+            "Effect": "Allow",
+            "Resource": "arn:aws:s3:::session19-site-5e23dba1/site/*"
+        }
+    ]
+}
+
+$ awslocal --region ap-south-1 s3 ls s3://$(terraform output -raw site_bucket) --recursive
+2026-10-07 21:29:50         57 site/index.html
+
+$ awslocal --region ap-south-1 s3 cp s3://$(terraform output -raw site_bucket)/site/index.html -
+<h1>Hello from session19 - provisioned by Terraform</h1>
+
+# what LocalStack Community does NOT give you: the instance is an API record, not a VM.
+# every container image running on this machine — nothing new appeared for i-... :
+$ docker ps --format '{{.Image}}' | sort
+gcr.io/k8s-minikube/kicbase:v0.0.51
+gcr.io/k8s-minikube/kicbase:v0.0.51
+localstack/localstack:4.14.0
+postgres:16-alpine
+postgres:17-alpine
+
+$ nc -vz -G 3 $(terraform output -raw instance_public_ip) 80; echo "exit code: $?"
+nc: connectx to 54.214.120.205 port 80 (tcp) failed: Operation timed out
+exit code: 1
+

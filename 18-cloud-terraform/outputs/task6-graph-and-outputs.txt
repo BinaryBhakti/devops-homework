@@ -1,0 +1,31 @@
+########## TASK 6 — dependency graph and outputs ##########
+
+$ terraform graph > graph.dot && grep -c -- "->" graph.dot
+19
+
+$ grep -- "->" graph.dot | grep -E "aws_instance.web|aws_route_table_association.public|aws_subnet.public" | grep -v provider | sed "s/\[root\] //g; s/ (expand)//g" | sort
+  "aws_instance.web" -> "aws_iam_instance_profile.web";
+  "aws_instance.web" -> "aws_iam_role_policy.read_site";
+  "aws_instance.web" -> "aws_route_table_association.public";
+  "aws_instance.web" -> "aws_s3_object.index";
+  "aws_instance.web" -> "aws_security_group.web";
+  "aws_instance.web" -> "data.aws_ami.linux";
+  "aws_route_table_association.public" -> "aws_route_table.public";
+  "aws_route_table_association.public" -> "aws_subnet.public";
+  "aws_subnet.public" -> "aws_vpc.main";
+
+$ terraform output -no-color
+ami_id = "ami-760aaa0f"
+instance_id = "i-5b36c93cf7bf4ac58"
+instance_private_ip = "10.20.1.4"
+instance_public_ip = "54.214.120.205"
+internet_gateway_id = "igw-5435a6826c328d71b"
+public_subnet_id = "subnet-193bcc5cb706c7c2d"
+security_group_id = "sg-0090ae80b9b8874bb"
+site_bucket = "session19-site-5e23dba1"
+vpc_cidr = "10.20.0.0/16"
+vpc_id = "vpc-c2c1b37a6c45ad588"
+
+$ terraform output -json | python3 -c "import json,sys; o=json.load(sys.stdin); print(o[\"instance_id\"][\"value\"], o[\"instance_private_ip\"][\"value\"], o[\"site_bucket\"][\"value\"])"
+i-5b36c93cf7bf4ac58 10.20.1.4 session19-site-5e23dba1
+

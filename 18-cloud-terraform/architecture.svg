@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 720" width="1100" height="720" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrDash" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b45309"/>
+    </marker>
+  </defs>
+  <rect width="1100" height="720" fill="#ffffff"/>
+
+  <text x="40" y="44" font-size="22" font-weight="700" fill="#0f172a">Homework 18 — Terraform-provisioned AWS infrastructure (run against LocalStack)</text>
+  <text x="40" y="68" font-size="13.5" fill="#475569">15 resources + 1 data source, created by terraform apply in dependency order · region ap-south-1</text>
+
+  <!-- Terraform -->
+  <rect x="40" y="96" width="200" height="120" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="140" y="126" text-anchor="middle" font-size="16" font-weight="700" fill="#5b21b6">Terraform 1.16</text>
+  <text x="140" y="150" text-anchor="middle" font-size="12.5" fill="#4c1d95">providers: aws ~&gt; 6.0</text>
+  <text x="140" y="168" text-anchor="middle" font-size="12.5" fill="#4c1d95">random ~&gt; 3.6</text>
+  <text x="140" y="192" text-anchor="middle" font-size="12" fill="#6d28d9">terraform.tfstate</text>
+
+  <!-- LocalStack edge -->
+  <rect x="40" y="260" width="200" height="96" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="1.5"/>
+  <text x="140" y="290" text-anchor="middle" font-size="15" font-weight="700" fill="#0f172a">LocalStack 4.14.0</text>
+  <text x="140" y="312" text-anchor="middle" font-size="12.5" fill="#334155">localhost:4566</text>
+  <text x="140" y="332" text-anchor="middle" font-size="12" fill="#64748b">EC2 · IAM · S3 · STS APIs</text>
+  <line x1="140" y1="216" x2="140" y2="256" stroke="#475569" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="150" y="242" font-size="11.5" fill="#475569">API calls</text>
+
+  <!-- Internet -->
+  <rect x="560" y="92" width="180" height="44" rx="22" fill="#ecfeff" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="650" y="120" text-anchor="middle" font-size="15" font-weight="600" fill="#155e75">Internet</text>
+
+  <!-- Region / VPC -->
+  <rect x="290" y="160" width="770" height="400" rx="12" fill="#f8fafc" stroke="#94a3b8" stroke-dasharray="6 5" stroke-width="1.4"/>
+  <text x="306" y="182" font-size="12.5" fill="#64748b">Region ap-south-1</text>
+
+  <rect x="310" y="196" width="730" height="344" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.6"/>
+  <text x="326" y="220" font-size="15" font-weight="700" fill="#166534">aws_vpc.main — 10.20.0.0/16</text>
+  <text x="326" y="238" font-size="12" fill="#15803d">DNS support + hostnames enabled</text>
+
+  <!-- IGW on VPC edge -->
+  <rect x="580" y="182" width="140" height="34" rx="6" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="650" y="204" text-anchor="middle" font-size="12.5" font-weight="600" fill="#9a3412">Internet Gateway</text>
+  <line x1="650" y1="136" x2="650" y2="180" stroke="#475569" stroke-width="1.6" marker-end="url(#arr)" marker-start="url(#arr)"/>
+
+  <!-- Route table -->
+  <rect x="840" y="250" width="180" height="84" rx="8" fill="#ffffff" stroke="#0369a1" stroke-width="1.4"/>
+  <text x="930" y="274" text-anchor="middle" font-size="13" font-weight="700" fill="#075985">Public route table</text>
+  <text x="930" y="294" text-anchor="middle" font-size="12" font-family="Menlo, monospace" fill="#0c4a6e">10.20.0.0/16 → local</text>
+  <text x="930" y="313" text-anchor="middle" font-size="12" font-family="Menlo, monospace" fill="#0c4a6e">0.0.0.0/0 → igw</text>
+  <path d="M720 199 C 800 199, 930 210, 930 246" fill="none" stroke="#475569" stroke-width="1.4" marker-end="url(#arr)"/>
+
+  <!-- Subnet -->
+  <rect x="340" y="262" width="470" height="258" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="356" y="286" font-size="14" font-weight="700" fill="#1e40af">Public subnet — 10.20.1.0/24 · ap-south-1a</text>
+  <text x="356" y="304" font-size="12" fill="#1d4ed8">map_public_ip_on_launch = true</text>
+  <line x1="838" y1="320" x2="812" y2="340" stroke="#475569" stroke-width="1.4" marker-end="url(#arr)"/>
+  <text x="826" y="358" font-size="11.5" fill="#475569">association</text>
+
+  <!-- SG + EC2 -->
+  <rect x="370" y="322" width="410" height="180" rx="10" fill="#fef2f2" stroke="#dc2626" stroke-width="1.4" stroke-dasharray="5 4"/>
+  <text x="386" y="344" font-size="13" font-weight="700" fill="#991b1b">Security group web-sg</text>
+  <text x="386" y="362" font-size="11.5" fill="#b91c1c">in: 80, 443 from 0.0.0.0/0 · 22 from 203.0.113.10/32 · out: all</text>
+
+  <rect x="400" y="380" width="350" height="104" rx="8" fill="#ffffff" stroke="#ea580c" stroke-width="1.6"/>
+  <text x="575" y="406" text-anchor="middle" font-size="15" font-weight="700" fill="#9a3412">EC2 aws_instance.web</text>
+  <text x="575" y="428" text-anchor="middle" font-size="12" fill="#7c2d12">t3.micro · AMI from data.aws_ami (amzn-ami-hvm)</text>
+  <text x="575" y="447" text-anchor="middle" font-size="12" fill="#7c2d12">10.20.1.x private · public IP on launch</text>
+  <text x="575" y="468" text-anchor="middle" font-size="11.5" fill="#9a3412">user_data: yum httpd + aws s3 cp index.html</text>
+
+  <!-- S3 outside VPC -->
+  <rect x="822" y="590" width="238" height="92" rx="10" fill="#fefce8" stroke="#ca8a04" stroke-width="1.6"/>
+  <text x="940" y="616" text-anchor="middle" font-size="15" font-weight="700" fill="#854d0e">S3 bucket</text>
+  <text x="940" y="636" text-anchor="middle" font-size="12" font-family="Menlo, monospace" fill="#713f12">session19-site-&lt;random_id&gt;</text>
+  <text x="940" y="656" text-anchor="middle" font-size="12" fill="#713f12">versioned · public access blocked</text>
+  <text x="940" y="673" text-anchor="middle" font-size="12" fill="#713f12">site/index.html</text>
+
+  <!-- IAM -->
+  <rect x="420" y="590" width="330" height="92" rx="10" fill="#fdf4ff" stroke="#a21caf" stroke-width="1.5"/>
+  <text x="585" y="616" text-anchor="middle" font-size="14" font-weight="700" fill="#86198f">IAM role + instance profile</text>
+  <text x="585" y="638" text-anchor="middle" font-size="12" fill="#701a75">trust: ec2.amazonaws.com</text>
+  <text x="585" y="657" text-anchor="middle" font-size="12" font-family="Menlo, monospace" fill="#701a75">s3:GetObject on bucket/site/*</text>
+
+  <line x1="585" y1="586" x2="585" y2="488" stroke="#475569" stroke-width="1.4" marker-end="url(#arr)"/>
+  <text x="592" y="580" font-size="11.5" fill="#475569">attached to</text>
+  <line x1="754" y1="636" x2="818" y2="636" stroke="#475569" stroke-width="1.4" marker-end="url(#arr)"/>
+  <text x="757" y="626" font-size="11" fill="#475569">grants read</text>
+
+  <!-- explicit depends_on -->
+  <path d="M752 420 C 900 420, 930 380, 930 338" fill="none" stroke="#b45309" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arrDash)"/>
+  <text x="828" y="456" font-size="11.5" font-weight="600" fill="#b45309">depends_on: route-table</text>
+  <text x="828" y="472" font-size="11.5" font-weight="600" fill="#b45309">association + role policy</text>
+
+  <!-- legend -->
+  <rect x="40" y="590" width="340" height="92" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="56" y="614" font-size="13" font-weight="700" fill="#0f172a">Legend</text>
+  <line x1="56" y1="634" x2="96" y2="634" stroke="#475569" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="106" y="638" font-size="12" fill="#334155">implicit dependency / traffic path</text>
+  <line x1="56" y1="660" x2="96" y2="660" stroke="#b45309" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arrDash)"/>
+  <text x="106" y="664" font-size="12" fill="#334155">explicit depends_on (ordering only)</text>
+</svg>

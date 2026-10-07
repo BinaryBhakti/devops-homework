@@ -1,0 +1,91 @@
+########## TASK 5 — terraform state ##########
+
+$ terraform state list
+data.aws_ami.linux
+aws_iam_instance_profile.web
+aws_iam_role.web
+aws_iam_role_policy.read_site
+aws_instance.web
+aws_internet_gateway.main
+aws_route_table.public
+aws_route_table_association.public
+aws_s3_bucket.site
+aws_s3_bucket_public_access_block.site
+aws_s3_bucket_versioning.site
+aws_s3_object.index
+aws_security_group.web
+aws_subnet.public
+aws_vpc.main
+random_id.bucket_suffix
+
+$ terraform state show -no-color aws_instance.web | grep -E "^ +(ami|id|instance_state|instance_type|private_ip|public_ip|subnet_id|iam_instance_profile|availability_zone) +="
+    ami                                  = "ami-760aaa0f"
+    availability_zone                    = "ap-south-1a"
+    iam_instance_profile                 = "session19-web-profile"
+    id                                   = "i-5b36c93cf7bf4ac58"
+    instance_state                       = "running"
+    instance_type                        = "t3.micro"
+    private_ip                           = "10.20.1.4"
+    public_ip                            = "54.214.120.205"
+    subnet_id                            = "subnet-193bcc5cb706c7c2d"
+
+$ terraform state show -no-color data.aws_ami.linux | grep -E "^ +(id|name|architecture|owner_id|root_device_type) +="
+    architecture          = "x86_64"
+    id                    = "ami-760aaa0f"
+    name                  = "amzn-ami-hvm-2017.09.1.20171103-x86_64-gp2"
+    owner_id              = "137112412989"
+    root_device_type      = "ebs"
+        name   = "name"
+
+$ python3 -c "import json; s=json.load(open(\"terraform.tfstate\")); print(\"version:\", s[\"version\"], \" serial:\", s[\"serial\"], \" lineage:\", s[\"lineage\"]); print(\"resources tracked:\", len(s[\"resources\"]))"
+version: 4  serial: 16  lineage: 7e68f6d6-712c-2fa8-4ad2-547994151064
+resources tracked: 16
+
+# state records what each resource depends on — this is how destroy knows the reverse order
+$ python3 -c "import json; s=json.load(open(\"terraform.tfstate\")); r=[x for x in s[\"resources\"] if x[\"type\"]==\"aws_instance\"][0]; print(\"\n\".join(sorted(r[\"instances\"][0][\"dependencies\"])))"
+aws_iam_instance_profile.web
+aws_iam_role.web
+aws_iam_role_policy.read_site
+aws_internet_gateway.main
+aws_route_table.public
+aws_route_table_association.public
+aws_s3_bucket.site
+aws_s3_object.index
+aws_security_group.web
+aws_subnet.public
+aws_vpc.main
+data.aws_ami.linux
+random_id.bucket_suffix
+
+# drift: change a tag behind Terraform's back, then ask Terraform what it sees
+$ awslocal --region ap-south-1 ec2 create-tags --resources $(terraform output -raw security_group_id) --tags Key=Session,Value=hand-edited
+
+$ terraform plan -no-color -detailed-exitcode | sed -n "/will be updated/,/^Plan:/p"; echo "exit code: ${PIPESTATUS[0]}  (2 = changes pending)"
+  # aws_security_group.web will be updated in-place
+  ~ resource "aws_security_group" "web" {
+        id                     = "sg-0090ae80b9b8874bb"
+        name                   = "session19-web-sg"
+      ~ tags                   = {
+            "Name"    = "session19-web-sg"
+          - "Session" = "hand-edited" -> null
+        }
+      ~ tags_all               = {
+          ~ "Session"   = "hand-edited" -> "19"
+            # (3 unchanged elements hidden)
+        }
+        # (9 unchanged attributes hidden)
+    }
+
+Plan: 0 to add, 1 to change, 0 to destroy.
+exit code: 2  (2 = changes pending)
+
+$ terraform apply -no-color -auto-approve | grep -E "Modif|Apply complete"
+aws_security_group.web: Modifying... [id=sg-0090ae80b9b8874bb]
+aws_security_group.web: Modifications complete after 2s [id=sg-0090ae80b9b8874bb]
+Apply complete! Resources: 0 added, 1 changed, 0 destroyed.
+
+$ terraform plan -no-color -detailed-exitcode | tail -2; echo "exit code: ${PIPESTATUS[0]}"
+Terraform has compared your real infrastructure against your configuration
+and found no differences, so no changes are needed.
+exit code: 0
+
