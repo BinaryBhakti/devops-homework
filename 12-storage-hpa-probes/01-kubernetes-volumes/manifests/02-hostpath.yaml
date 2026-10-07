@@ -1,0 +1,19 @@
+# hostPath: a directory on the NODE's filesystem. Survives the Pod, but is tied to whichever
+# node the Pod lands on. Pinned to the worker node here so the node dependence can be shown.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hostpath-demo
+spec:
+  nodeName: minikube-m02
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ["sh", "-c", "echo \"pod $(hostname) was here at $(date +%T)\" >> /data/visits.log; sleep 3600"]
+      volumeMounts:
+        - { name: host-storage, mountPath: /data }
+  volumes:
+    - name: host-storage
+      hostPath:
+        path: /tmp/hostpath-data
+        type: DirectoryOrCreate

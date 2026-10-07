@@ -1,0 +1,132 @@
+########## TASK 1 — Kubernetes volumes: emptyDir, hostPath, PV/PVC, StorageClass, dynamic provisioning ##########
+
+# 1. emptyDir — shared between the containers of ONE pod, and dies with the pod
+$ kubectl apply -f 01-emptydir.yaml && kubectl wait pod/emptydir-demo --for=condition=Ready --timeout=120s
+pod/emptydir-demo created
+pod/emptydir-demo condition met
+
+$ kubectl exec emptydir-demo -c web -- wget -qO- localhost
+written by the writer container at 16:18:34
+
+$ kubectl exec emptydir-demo -c writer -- ls -l /shared; kubectl exec emptydir-demo -c web -- ls -l /usr/share/nginx/html
+total 4
+-rw-r--r--    1 root     root            44 Oct  7 16:18 index.html
+total 4
+-rw-r--r--    1 root     root            44 Oct  7 16:18 index.html
+
+$ kubectl exec emptydir-demo -c web -- df -h /usr/share/nginx/html | tail -1
+/dev/vda1               223.6G     16.8G    195.4G   8% /etc/hosts
+
+$ minikube ssh -n $(kubectl get pod emptydir-demo -o jsonpath='{.spec.nodeName}') -- "sudo find /var/lib/kubelet/pods/$(kubectl get pod emptydir-demo -o jsonpath='{.metadata.uid}')/volumes -name index.html"
+/var/lib/kubelet/pods/e21051e9-2996-4056-8573-d720d2ccdd1b/volumes/kubernetes.io~empty-dir/shared/index.html
+
+$ kubectl delete pod emptydir-demo --wait=true && kubectl apply -f 01-emptydir.yaml >/dev/null && kubectl wait pod/emptydir-demo --for=condition=Ready --timeout=120s >/dev/null; kubectl exec emptydir-demo -c writer -- sh -c "ls -l --full-time /shared"
+pod "emptydir-demo" deleted from default namespace
+total 4
+-rw-r--r--    1 root     root            44 2026-10-07 16:19:13 +0000 index.html
+
+# a new pod gets a NEW empty directory: the file was re-created seconds ago by the new writer
+$ kubectl delete pod emptydir-demo
+pod "emptydir-demo" deleted from default namespace
+
+# 2. hostPath — lives on the node, outlives the pod, but only on THAT node
+$ kubectl apply -f 02-hostpath.yaml && kubectl wait pod/hostpath-demo --for=condition=Ready --timeout=120s >/dev/null; kubectl delete pod hostpath-demo --wait=true
+pod/hostpath-demo created
+pod "hostpath-demo" deleted from default namespace
+
+$ kubectl apply -f 02-hostpath.yaml && kubectl wait pod/hostpath-demo --for=condition=Ready --timeout=120s >/dev/null; kubectl exec hostpath-demo -- cat /data/visits.log
+pod/hostpath-demo created
+pod hostpath-demo was here at 16:19:49
+pod hostpath-demo was here at 16:20:34
+
+# two pods, two lines: the file survived the first pod. Now look at the node itself:
+$ minikube ssh -n minikube-m02 -- cat /tmp/hostpath-data/visits.log
+pod hostpath-demo was here at 16:19:49
+pod hostpath-demo was here at 16:20:34
+
+$ minikube ssh -n minikube -- "cat /tmp/hostpath-data/visits.log 2>&1"
+cat: /tmp/hostpath-data/visits.log: No such file or directory
+ssh: Process exited with status 1
+
+# the data exists on minikube-m02 only. A pod rescheduled to the other node would see an empty directory
+$ kubectl delete pod hostpath-demo
+pod "hostpath-demo" deleted from default namespace
+
+# 3. Static provisioning — admin writes the PV, user writes the PVC, Kubernetes binds them
+$ kubectl apply -f 03-static-pv.yaml
+persistentvolume/student-pv created
+persistentvolumeclaim/student-pvc created
+pod/storage-demo created
+
+$ kubectl wait pvc/student-pvc --for=jsonpath={.status.phase}=Bound --timeout=60s; kubectl get pv student-pv; kubectl get pvc student-pvc
+persistentvolumeclaim/student-pvc condition met
+NAME         CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                 STORAGECLASS   VOLUMEATTRIBUTESCLASS   REASON   AGE
+student-pv   1Gi        RWO            Retain           Bound    default/student-pvc   manual         <unset>                          9s
+NAME          STATUS   VOLUME       CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+student-pvc   Bound    student-pv   1Gi        RWO            manual         <unset>                 10s
+
+# the claim asked for 500Mi and got the whole 1Gi PV: binding is one PV per PVC
+$ kubectl wait pod/storage-demo --for=condition=Ready --timeout=120s && kubectl exec storage-demo -- sh -c "echo persisted-across-pods > /data/proof.txt; cat /data/proof.txt"
+pod/storage-demo condition met
+persisted-across-pods
+
+$ kubectl delete pod storage-demo --wait=true && kubectl apply -f 03-static-pv.yaml >/dev/null && kubectl wait pod/storage-demo --for=condition=Ready --timeout=120s >/dev/null && kubectl exec storage-demo -- cat /data/proof.txt
+pod "storage-demo" deleted from default namespace
+persisted-across-pods
+
+# reclaim policy Retain: delete the claim and watch the PV
+$ kubectl delete pod storage-demo && kubectl delete pvc student-pvc && kubectl get pv student-pv
+pod "storage-demo" deleted from default namespace
+persistentvolumeclaim "student-pvc" deleted from default namespace
+NAME         CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS     CLAIM                 STORAGECLASS   VOLUMEATTRIBUTESCLASS   REASON   AGE
+student-pv   1Gi        RWO            Retain           Released   default/student-pvc   manual         <unset>                          104s
+
+$ minikube ssh -n minikube -- cat /tmp/student-data/proof.txt
+persisted-across-pods
+
+# Released, not Available: the data is kept and the PV will NOT bind to a new claim until an admin clears spec.claimRef
+$ kubectl delete pv student-pv
+persistentvolume "student-pv" deleted
+
+# 4. StorageClass — the recipe for making PVs on demand
+$ kubectl get storageclass
+NAME                 PROVISIONER                RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
+standard (default)   k8s.io/minikube-hostpath   Delete          Immediate           false                  19d
+
+$ kubectl get storageclass standard -o yaml | grep -E '^(provisioner|reclaimPolicy|volumeBindingMode)|is-default-class'
+      {"apiVersion":"storage.k8s.io/v1","kind":"StorageClass","metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"},"labels":{"addonmanager.kubernetes.io/mode":"EnsureExists"},"name":"standard"},"provisioner":"k8s.io/minikube-hostpath"}
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: k8s.io/minikube-hostpath
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+
+# 5. Dynamic provisioning — a PVC alone produces a PV
+$ kubectl get pv
+No resources found
+
+$ kubectl apply -f 04-dynamic-pvc.yaml
+persistentvolumeclaim/dynamic-pvc created
+pod/dynamic-demo created
+
+$ kubectl wait pvc/dynamic-pvc --for=jsonpath={.status.phase}=Bound --timeout=60s; kubectl get pvc dynamic-pvc; kubectl get pv
+persistentvolumeclaim/dynamic-pvc condition met
+NAME          STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+dynamic-pvc   Bound    pvc-ead740c2-29c7-4645-aa66-3692eba1fea3   500Mi      RWO            standard       <unset>                 1s
+NAME                                       CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                 STORAGECLASS   VOLUMEATTRIBUTESCLASS   REASON   AGE
+pvc-ead740c2-29c7-4645-aa66-3692eba1fea3   500Mi      RWO            Delete           Bound    default/dynamic-pvc   standard       <unset>                          1s
+
+$ kubectl get pv $(kubectl get pvc dynamic-pvc -o jsonpath='{.spec.volumeName}') -o jsonpath='{.spec.hostPath.path}{"\n"}{.metadata.annotations.pv\.kubernetes\.io/provisioned-by}{"\n"}'
+/tmp/hostpath-provisioner/default/dynamic-pvc
+k8s.io/minikube-hostpath
+
+$ kubectl wait pod/dynamic-demo --for=condition=Ready --timeout=120s && kubectl exec dynamic-demo -- sh -c "echo hello > /data/hello.txt && ls -l /data"
+pod/dynamic-demo condition met
+total 4
+-rw-r--r--    1 root     root             6 Oct  7 16:23 hello.txt
+
+# reclaim policy Delete: removing the claim removes the PV too
+$ kubectl delete pod dynamic-demo && kubectl delete pvc dynamic-pvc && sleep 5 && kubectl get pv
+pod "dynamic-demo" deleted from default namespace
+persistentvolumeclaim "dynamic-pvc" deleted from default namespace
+No resources found
+
