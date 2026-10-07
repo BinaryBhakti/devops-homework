@@ -487,7 +487,29 @@ the repository's history.
 
 ## Pipeline runs on GitHub
 
-<!-- PIPELINE-RUNS -->
+The workflow is [`.github/workflows/hw16-devsecops.yml`](../.github/workflows/hw16-devsecops.yml)
+at the repository root, with a `paths:` filter for this folder.
+
+| Run | Commit | Result | Link |
+|---|---|---|---|
+| #1 | `73c4def` adding this homework | **success**: all 10 stages green, 5 m 32 s, 7 artifacts | [run 37668969274](https://github.com/BinaryBhakti/devops-homework/actions/runs/37668969274) |
+
+This is a real browser screenshot of the public run page, taken with headless Chrome. Step
+logs need a signed-in GitHub account to view.
+
+![run #1: Build → Unit Test → SAST → SCA → Secret Scan → Docker Build → Image Scan → Security Gate → Push → Deploy, all green](screenshots/github-run-1-success.png)
+*run #1: Build → Unit Test → SAST → SCA → Secret Scan → Docker Build → Image Scan → Security Gate → Push → Deploy, all green*
+
+The ten jobs run as a strict `needs:` chain in exactly the order the brief asks for, and the
+graph on the run page is a straight line. The artifacts are the security evidence each stage
+leaves behind: `sast-reports`, `sca-reports`, `secret-scan-report`, `image-scan-report` and
+`unit-test-results`, plus the `image` tarball. The gate reads the reports; it does not
+re-run the scanners.
+
+It passed first time because every finding was fixed locally before pushing (see the scans
+above). Before the fixes, the course code fails the gate on Bandit B201 HIGH, two Semgrep
+findings and the root user in the image. The section on demonstrating the gate shows how to
+make it block on GitHub with a one-line change on a throwaway branch.
 
 ---
 
