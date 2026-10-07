@@ -1,0 +1,169 @@
+########## VPC — CIDR, subnets, route tables, IGW, NAT, SG vs NACL (LocalStack 4.14.0) ##########
+
+# every region starts with a default VPC (172.31.0.0/16) — this is the one EC2 used in 02-ec2
+$ awslocal ec2 describe-vpcs --filters Name=is-default,Values=true --query 'Vpcs[].[VpcId,CidrBlock,IsDefault]' --output text
+vpc-3c2c1dbf54ef9a628	172.31.0.0/16	True
+
+# a /16 gives 65,536 addresses to carve into subnets
+$ awslocal ec2 create-vpc --cidr-block 10.0.0.0/16 --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=research-vpc}]' --query 'Vpc.[VpcId,CidrBlock,State]' --output text
+vpc-a5139bcc367c2eccb	10.0.0.0/16	available
+
+# AWS rejects VPC CIDRs larger than /16 or smaller than /28
+$ awslocal ec2 create-vpc --cidr-block 10.0.0.0/8 --query Vpc.VpcId --output text
+
+An error occurred (InvalidVpc.Range) when calling the CreateVpc operation: The CIDR '10.0.0.0/8' is invalid.
+
+$ cat > /tmp/research-vpc.sh <<'EOF'
+VPC=$(aws --endpoint-url http://localhost:4566 ec2 describe-vpcs --filters Name=tag:Name,Values=research-vpc --query 'Vpcs[0].VpcId' --output text)
+EOF
+echo 'helper written'
+helper written
+
+# two subnets, one per role, each in an AZ. A subnet lives in exactly ONE AZ
+$ source /tmp/research-vpc.sh
+awslocal ec2 create-subnet --vpc-id $VPC --cidr-block 10.0.1.0/24 --availability-zone us-east-1a --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=research-public-a}]' --query 'Subnet.[SubnetId,CidrBlock,AvailabilityZone,AvailableIpAddressCount]' --output text
+awslocal ec2 create-subnet --vpc-id $VPC --cidr-block 10.0.2.0/24 --availability-zone us-east-1b --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=research-private-b}]' --query 'Subnet.[SubnetId,CidrBlock,AvailabilityZone,AvailableIpAddressCount]' --output text
+subnet-e89f68b0f96d7393f	10.0.1.0/24	us-east-1a	251
+subnet-1dba90b0fdc1caa1f	10.0.2.0/24	us-east-1b	251
+
+# 251 usable of 256: AWS reserves 5 per subnet (network, router, DNS, future use, broadcast)
+# a subnet must sit inside the VPC CIDR and must not overlap a sibling
+$ source /tmp/research-vpc.sh; awslocal ec2 create-subnet --vpc-id $VPC --cidr-block 10.0.1.128/25 --query Subnet.SubnetId --output text
+
+An error occurred (InvalidSubnet.Conflict) when calling the CreateSubnet operation: The CIDR '10.0.1.128/25' conflicts with another subnet
+
+$ source /tmp/research-vpc.sh; awslocal ec2 create-subnet --vpc-id $VPC --cidr-block 192.168.0.0/24 --query Subnet.SubnetId --output text
+
+An error occurred (InvalidSubnet.Range) when calling the CreateSubnet operation: The CIDR '192.168.0.0/24' is invalid.
+
+# internet gateway: created detached, then attached to the VPC (one IGW per VPC)
+$ source /tmp/research-vpc.sh
+IGW=$(awslocal ec2 create-internet-gateway --tag-specifications 'ResourceType=internet-gateway,Tags=[{Key=Name,Value=research-igw}]' --query 'InternetGateway.InternetGatewayId' --output text); echo $IGW
+awslocal ec2 attach-internet-gateway --internet-gateway-id $IGW --vpc-id $VPC
+awslocal ec2 describe-internet-gateways --internet-gateway-ids $IGW --query 'InternetGateways[0].Attachments' --output text
+igw-70a52b770f4eb15f2
+available	vpc-a5139bcc367c2eccb
+
+# the VPC came with a MAIN route table that only knows the local route
+$ source /tmp/research-vpc.sh; awslocal ec2 describe-route-tables --filters Name=vpc-id,Values=$VPC --query 'RouteTables[].{main:Associations[0].Main,routes:Routes[].[DestinationCidrBlock,GatewayId]}' --output json
+[
+    {
+        "main": true,
+        "routes": [
+            [
+                "10.0.0.0/16",
+                "local"
+            ]
+        ]
+    }
+]
+
+# PUBLIC route table: local + 0.0.0.0/0 -> IGW, associated with the public subnet. That route is what makes a subnet 'public'
+$ source /tmp/research-vpc.sh
+IGW=$(awslocal ec2 describe-internet-gateways --filters Name=tag:Name,Values=research-igw --query 'InternetGateways[0].InternetGatewayId' --output text)
+PUB=$(awslocal ec2 describe-subnets --filters Name=tag:Name,Values=research-public-a --query 'Subnets[0].SubnetId' --output text)
+RT=$(awslocal ec2 create-route-table --vpc-id $VPC --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=research-public-rt}]' --query 'RouteTable.RouteTableId' --output text); echo $RT
+awslocal ec2 create-route --route-table-id $RT --destination-cidr-block 0.0.0.0/0 --gateway-id $IGW --output text
+awslocal ec2 associate-route-table --route-table-id $RT --subnet-id $PUB --query AssociationState.State --output text
+awslocal ec2 modify-subnet-attribute --subnet-id $PUB --map-public-ip-on-launch && echo 'public subnet: auto-assign public IPv4 on'
+rtb-2bf541e8f3a31b0bf
+True
+None
+public subnet: auto-assign public IPv4 on
+
+# NAT gateway: lives IN the public subnet, with an Elastic IP; the PRIVATE route table points 0.0.0.0/0 at it
+$ source /tmp/research-vpc.sh
+PUB=$(awslocal ec2 describe-subnets --filters Name=tag:Name,Values=research-public-a --query 'Subnets[0].SubnetId' --output text)
+PRIV=$(awslocal ec2 describe-subnets --filters Name=tag:Name,Values=research-private-b --query 'Subnets[0].SubnetId' --output text)
+EIP=$(awslocal ec2 allocate-address --domain vpc --query AllocationId --output text); echo EIP $EIP
+NAT=$(awslocal ec2 create-nat-gateway --subnet-id $PUB --allocation-id $EIP --query 'NatGateway.NatGatewayId' --output text); echo NAT $NAT
+RT=$(awslocal ec2 create-route-table --vpc-id $VPC --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=research-private-rt}]' --query 'RouteTable.RouteTableId' --output text); echo $RT
+awslocal ec2 create-route --route-table-id $RT --destination-cidr-block 0.0.0.0/0 --nat-gateway-id $NAT --output text
+awslocal ec2 associate-route-table --route-table-id $RT --subnet-id $PRIV --query AssociationState.State --output text
+EIP eipalloc-9ef30d251f2ce0e43
+NAT nat-4bf1dd3c297d1a47d
+rtb-bd19c3e87b23ae6d9
+True
+None
+
+$ source /tmp/research-vpc.sh; awslocal ec2 describe-route-tables --filters Name=vpc-id,Values=$VPC Name=tag:Name,Values=research-public-rt,research-private-rt --query 'RouteTables[].[Tags[0].Value, Routes[].[DestinationCidrBlock, GatewayId || NatGatewayId]]' --output json
+[
+    [
+        "research-public-rt",
+        [
+            [
+                "10.0.0.0/16",
+                "local"
+            ],
+            [
+                "0.0.0.0/0",
+                "igw-70a52b770f4eb15f2"
+            ]
+        ]
+    ],
+    [
+        "research-private-rt",
+        [
+            [
+                "10.0.0.0/16",
+                "local"
+            ],
+            [
+                "0.0.0.0/0",
+                "nat-4bf1dd3c297d1a47d"
+            ]
+        ]
+    ]
+]
+
+# security group (stateful, allow-only, per ENI) vs network ACL (stateless, allow+deny, per subnet, numbered rules)
+$ source /tmp/research-vpc.sh
+SG=$(awslocal ec2 create-security-group --vpc-id $VPC --group-name research-app-sg --description 'app tier' --query GroupId --output text); echo $SG
+awslocal ec2 authorize-security-group-ingress --group-id $SG --protocol tcp --port 443 --cidr 0.0.0.0/0 --query 'SecurityGroupRules[0].[IpProtocol,FromPort,CidrIpv4]' --output text
+sg-5b1fa573924a31e11
+tcp	443	0.0.0.0/0
+
+$ source /tmp/research-vpc.sh
+ACL=$(awslocal ec2 create-network-acl --vpc-id $VPC --tag-specifications 'ResourceType=network-acl,Tags=[{Key=Name,Value=research-nacl}]' --query 'NetworkAcl.NetworkAclId' --output text); echo $ACL
+awslocal ec2 create-network-acl-entry --network-acl-id $ACL --rule-number 90  --protocol tcp --port-range From=22,To=22 --cidr-block 198.51.100.0/24 --rule-action deny --ingress
+awslocal ec2 create-network-acl-entry --network-acl-id $ACL --rule-number 100 --protocol tcp --port-range From=443,To=443 --cidr-block 0.0.0.0/0 --rule-action allow --ingress
+awslocal ec2 create-network-acl-entry --network-acl-id $ACL --rule-number 110 --protocol tcp --port-range From=1024,To=65535 --cidr-block 0.0.0.0/0 --rule-action allow --ingress
+awslocal ec2 create-network-acl-entry --network-acl-id $ACL --rule-number 100 --protocol tcp --port-range From=1024,To=65535 --cidr-block 0.0.0.0/0 --rule-action allow --egress
+awslocal ec2 describe-network-acls --network-acl-ids $ACL --query 'NetworkAcls[0].Entries[].[RuleNumber,Egress,RuleAction,CidrBlock,PortRange.From,PortRange.To]' --output table
+acl-c2253c6d081344732
+---------------------------------------------------------------
+|                     DescribeNetworkAcls                     |
++-----+--------+--------+-------------------+-------+---------+
+|  90 |  False |  deny  |  198.51.100.0/24  |  22   |  22     |
+|  100|  False |  allow |  0.0.0.0/0        |  443  |  443    |
+|  110|  False |  allow |  0.0.0.0/0        |  1024 |  65535  |
+|  100|  True  |  allow |  0.0.0.0/0        |  1024 |  65535  |
++-----+--------+--------+-------------------+-------+---------+
+
+# the 1024-65535 rules exist because NACLs are stateless: return traffic to the client's ephemeral port must be allowed explicitly
+# the whole picture
+$ source /tmp/research-vpc.sh; awslocal ec2 describe-subnets --filters Name=vpc-id,Values=$VPC --query 'Subnets[].[Tags[0].Value,CidrBlock,AvailabilityZone,MapPublicIpOnLaunch]' --output table
+--------------------------------------------------------------
+|                       DescribeSubnets                      |
++---------------------+---------------+-------------+--------+
+|  research-public-a  |  10.0.1.0/24  |  us-east-1a |  True  |
+|  research-private-b |  10.0.2.0/24  |  us-east-1b |  False |
++---------------------+---------------+-------------+--------+
+
+# cleanup — dependencies first: NAT, EIP, routes/associations, IGW, subnets, SG, NACL, VPC
+$ source /tmp/research-vpc.sh
+for n in $(awslocal ec2 describe-nat-gateways --filter Name=vpc-id,Values=$VPC --query 'NatGateways[].NatGatewayId' --output text); do awslocal ec2 delete-nat-gateway --nat-gateway-id $n >/dev/null; done
+for a in $(awslocal ec2 describe-addresses --query 'Addresses[].AllocationId' --output text); do awslocal ec2 release-address --allocation-id $a; done
+for rt in $(awslocal ec2 describe-route-tables --filters Name=vpc-id,Values=$VPC --query 'RouteTables[?Associations[0].Main!=`true`].RouteTableId' --output text); do
+  for as in $(awslocal ec2 describe-route-tables --route-table-ids $rt --query 'RouteTables[0].Associations[].RouteTableAssociationId' --output text); do awslocal ec2 disassociate-route-table --association-id $as; done
+  awslocal ec2 delete-route-table --route-table-id $rt; done
+for i in $(awslocal ec2 describe-internet-gateways --filters Name=attachment.vpc-id,Values=$VPC --query 'InternetGateways[].InternetGatewayId' --output text); do awslocal ec2 detach-internet-gateway --internet-gateway-id $i --vpc-id $VPC; awslocal ec2 delete-internet-gateway --internet-gateway-id $i; done
+for s in $(awslocal ec2 describe-subnets --filters Name=vpc-id,Values=$VPC --query 'Subnets[].SubnetId' --output text); do awslocal ec2 delete-subnet --subnet-id $s; done
+awslocal ec2 delete-security-group --group-id $(awslocal ec2 describe-security-groups --filters Name=vpc-id,Values=$VPC Name=group-name,Values=research-app-sg --query 'SecurityGroups[0].GroupId' --output text)
+awslocal ec2 delete-network-acl --network-acl-id $(awslocal ec2 describe-network-acls --filters Name=tag:Name,Values=research-nacl --query 'NetworkAcls[0].NetworkAclId' --output text)
+awslocal ec2 delete-vpc --vpc-id $VPC && echo 'VPC deleted'
+VPC deleted
+
+$ awslocal ec2 describe-vpcs --query 'Vpcs[].[CidrBlock,IsDefault]' --output text; rm -f /tmp/research-vpc.sh
+172.31.0.0/16	True
+

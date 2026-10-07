@@ -1,0 +1,198 @@
+########## S3 — buckets, objects, storage classes, versioning, lifecycle, encryption, policy (LocalStack 4.14.0) ##########
+
+$ awslocal s3 mb s3://research-docs-bucket
+make_bucket: research-docs-bucket
+
+# objects: a key (which only LOOKS like a path), a body, and metadata
+$ echo 'version one' > notes.txt && awslocal s3 cp notes.txt s3://research-docs-bucket/team/notes.txt
+Completed 12 Bytes/12 Bytes (18 Bytes/s) with 1 file(s) remainingupload: ./notes.txt to s3://research-docs-bucket/team/notes.txt  
+
+$ echo 'hello public' | awslocal s3 cp - s3://research-docs-bucket/public/index.html --content-type text/html
+
+$ echo 'archived' | awslocal s3 cp - s3://research-docs-bucket/logs/2026-09.log --storage-class STANDARD_IA
+
+$ awslocal s3api list-objects-v2 --bucket research-docs-bucket --query 'Contents[].[Key,Size,StorageClass]' --output table
+--------------------------------------------
+|               ListObjectsV2              |
++--------------------+-----+---------------+
+|  logs/2026-09.log  |  9  |  STANDARD_IA  |
+|  public/index.html |  13 |  STANDARD     |
+|  team/notes.txt    |  12 |  STANDARD     |
++--------------------+-----+---------------+
+
+# there are no folders: 'team/' is just a key prefix that the console draws as a folder
+$ awslocal s3api list-objects-v2 --bucket research-docs-bucket --delimiter / --query '[CommonPrefixes[].Prefix, KeyCount]' --output json
+[
+    [
+        "logs/",
+        "public/",
+        "team/"
+    ],
+    null
+]
+
+$ awslocal s3api head-object --bucket research-docs-bucket --key public/index.html --query '{type:ContentType,len:ContentLength,etag:ETag}'
+{
+    "type": "text/html",
+    "len": 13,
+    "etag": "\"b08fcc3336e721fa1728f506ea20c209\""
+}
+
+# versioning: turn it on, overwrite the same key, and every version survives
+$ awslocal s3api get-bucket-versioning --bucket research-docs-bucket
+
+$ awslocal s3api put-bucket-versioning --bucket research-docs-bucket --versioning-configuration Status=Enabled && awslocal s3api get-bucket-versioning --bucket research-docs-bucket --output text
+Enabled
+
+$ echo 'version two' > notes.txt && awslocal s3 cp notes.txt s3://research-docs-bucket/team/notes.txt && echo 'version three' > notes.txt && awslocal s3 cp notes.txt s3://research-docs-bucket/team/notes.txt
+Completed 12 Bytes/12 Bytes (45 Bytes/s) with 1 file(s) remainingupload: ./notes.txt to s3://research-docs-bucket/team/notes.txt  
+Completed 14 Bytes/14 Bytes (123 Bytes/s) with 1 file(s) remainingupload: ./notes.txt to s3://research-docs-bucket/team/notes.txt   
+
+$ awslocal s3api list-object-versions --bucket research-docs-bucket --prefix team/notes.txt --query 'Versions[].[VersionId,IsLatest,Size]' --output table
+-----------------------------------------------------
+|                ListObjectVersions                 |
++-----------------------------------+--------+------+
+|  AaEXDD1c...FkG7WJWng_bz2m64LSbnm |  True  |  14  |
+|  AaEXDD1b4v1J1imgs2w9AHbugqSQbZtf |  False |  12  |
+|  null                             |  False |  12  |
++-----------------------------------+--------+------+
+
+# the first version was uploaded BEFORE versioning was on, so its VersionId is the literal string 'null'
+# now 'delete' it: on a versioned bucket a delete only adds a delete marker
+$ awslocal s3 rm s3://research-docs-bucket/team/notes.txt && awslocal s3 cp s3://research-docs-bucket/team/notes.txt - 2>&1 | tail -1
+delete: s3://research-docs-bucket/team/notes.txt
+download failed: s3://research-docs-bucket/team/notes.txt to - An error occurred (404) when calling the HeadObject operation: Not Found
+
+$ awslocal s3api list-object-versions --bucket research-docs-bucket --prefix team/notes.txt --query '{markers:DeleteMarkers[].[VersionId,IsLatest],versions:Versions[].[VersionId,IsLatest]}' --output json
+{
+    "markers": [
+        [
+            "AaEXDD1d39LMmIRp4WvErusMDnMTf3vn",
+            true
+        ]
+    ],
+    "versions": [
+        [
+            "AaEXDD1c...FkG7WJWng_bz2m64LSbnm",
+            false
+        ],
+        [
+            "AaEXDD1b4v1J1imgs2w9AHbugqSQbZtf",
+            false
+        ],
+        [
+            "null",
+            false
+        ]
+    ]
+}
+
+# undelete = delete the delete marker
+$ M=$(awslocal s3api list-object-versions --bucket research-docs-bucket --prefix team/notes.txt --query 'DeleteMarkers[0].VersionId' --output text)
+awslocal s3api delete-object --bucket research-docs-bucket --key team/notes.txt --version-id $M >/dev/null && echo 'removed the delete marker'
+awslocal s3 cp s3://research-docs-bucket/team/notes.txt -
+removed the delete marker
+version three
+
+# and any older version is still fetchable by id
+$ awslocal s3api get-object --bucket research-docs-bucket --key team/notes.txt --version-id null /dev/stdout --query VersionId --output text
+version one
+null
+
+# lifecycle: tier logs/ down to IA after 30 days, Glacier after 90, expire after a year
+$ cat research-lifecycle.json
+{
+  "Rules": [
+    {
+      "ID": "logs-tiering",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "logs/" },
+      "Transitions": [
+        { "Days": 30,  "StorageClass": "STANDARD_IA" },
+        { "Days": 90,  "StorageClass": "GLACIER" }
+      ],
+      "Expiration": { "Days": 365 },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 30 }
+    }
+  ]
+}
+
+$ awslocal s3api put-bucket-lifecycle-configuration --bucket research-docs-bucket --lifecycle-configuration file://research-lifecycle.json && awslocal s3api get-bucket-lifecycle-configuration --bucket research-docs-bucket --query 'Rules[].[ID,Status,Filter.Prefix,Expiration.Days]' --output text
+{
+    "TransitionDefaultMinimumObjectSize": "all_storage_classes_128K"
+}
+logs-tiering	Enabled	logs/	365
+
+# encryption: what is the default on a new bucket?
+$ awslocal s3api get-bucket-encryption --bucket research-docs-bucket --query 'ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault'
+{
+    "SSEAlgorithm": "AES256"
+}
+
+# SSE-S3 (AES256): S3 owns and rotates the key. Write an object WITHOUT asking for encryption and check it
+$ awslocal s3api put-bucket-encryption --bucket research-docs-bucket --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}' && awslocal s3api get-bucket-encryption --bucket research-docs-bucket --query 'ServerSideEncryptionConfiguration.Rules[0]'
+{
+    "ApplyServerSideEncryptionByDefault": {
+        "SSEAlgorithm": "AES256"
+    }
+}
+
+$ echo 'secret-ish' | awslocal s3 cp - s3://research-docs-bucket/team/plan.txt && awslocal s3api head-object --bucket research-docs-bucket --key team/plan.txt --query '{sse:ServerSideEncryption}'
+{
+    "sse": "AES256"
+}
+
+# SSE-KMS needs the KMS service. This LocalStack runs with SERVICES=s3,ec2,iam,sts,dynamodb — no kms
+$ awslocal s3api put-bucket-encryption --bucket research-docs-bucket --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"aws:kms"}}]}' && echo 'kms' | awslocal s3 cp - s3://research-docs-bucket/team/kms.txt
+upload failed: - to s3://research-docs-bucket/team/kms.txt An error occurred (InternalError) when calling the PutObject operation (reached max retries: 4): exception while calling s3.PutObject: An error occurred (InternalFailure) when calling the CreateKey operation: Service 'kms' is not enabled. Please check your 'SERVICES' configuration variable.
+
+# the bucket setting is accepted, but the first write fails: S3 calls KMS CreateKey and KMS is not there.
+# the same dependency exists on real AWS — SSE-KMS PUTs fail with AccessDenied if the caller lacks kms:GenerateDataKey.
+$ awslocal s3api put-bucket-encryption --bucket research-docs-bucket --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}' && echo 'back to AES256'
+back to AES256
+
+# bucket policy: deny any non-TLS request, allow anonymous read of public/ only
+$ cat research-bucket-policy.json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyInsecureTransport",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::research-docs-bucket",
+        "arn:aws:s3:::research-docs-bucket/*"
+      ],
+      "Condition": { "Bool": { "aws:SecureTransport": "false" } }
+    },
+    {
+      "Sid": "PublicReadOfPublicPrefixOnly",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::research-docs-bucket/public/*"
+    }
+  ]
+}
+
+$ awslocal s3api put-bucket-policy --bucket research-docs-bucket --policy file://research-bucket-policy.json && awslocal s3api get-bucket-policy --bucket research-docs-bucket --query Policy --output text | python3 -c 'import json,sys; [print(s["Sid"], s["Effect"]) for s in json.load(sys.stdin)["Statement"]]'
+DenyInsecureTransport Deny
+PublicReadOfPublicPrefixOnly Allow
+
+# anonymous plain-HTTP reads — the public/ key, and a key the policy did not open up
+$ curl -s -o /dev/null -w 'public/index.html -> %{http_code}\n' http://localhost:4566/research-docs-bucket/public/index.html; curl -s -o /dev/null -w 'team/plan.txt     -> %{http_code}\n' http://localhost:4566/research-docs-bucket/team/plan.txt
+public/index.html -> 200
+team/plan.txt     -> 200
+
+# both 200. On AWS both would be 403: the request is plain HTTP, so DenyInsecureTransport matches — and an explicit Deny beats any Allow.
+# even over HTTPS, team/plan.txt would be 403 (no Allow for anonymous). LocalStack community stores bucket policies but does not enforce them.
+# cleanup — a versioned bucket must have every VERSION and delete marker removed before rb
+$ awslocal s3api list-object-versions --bucket research-docs-bucket --output json --query '{Objects: [Versions[].{Key:Key,VersionId:VersionId}, DeleteMarkers[].{Key:Key,VersionId:VersionId}][] }' > /tmp/research-del.json && awslocal s3api delete-objects --bucket research-docs-bucket --delete file:///tmp/research-del.json --query 'length(Deleted)' && awslocal s3 rb s3://research-docs-bucket && rm -f notes.txt /tmp/research-del.json
+6
+remove_bucket: research-docs-bucket
+
+$ awslocal s3 ls | grep research- || echo 'no research- buckets left'
+no research- buckets left
+

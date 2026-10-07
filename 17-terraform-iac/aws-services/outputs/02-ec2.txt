@@ -1,0 +1,152 @@
+########## EC2 — AMIs, instance types, key pairs, security groups, EBS, lifecycle (LocalStack 4.14.0) ##########
+
+# AMIs: the image an instance boots from. LocalStack ships a small catalogue of mock AMIs
+$ awslocal ec2 describe-images --query 'length(Images)'
+1159
+
+$ awslocal ec2 describe-images --filters 'Name=name,Values=ubuntu*' --query 'Images[:4].[ImageId,Name,Architecture]' --output table
+-----------------------------------------------------------------------------------------------
+|                                       DescribeImages                                        |
++--------------+-------------------------------------------------------------------+----------+
+|  ami-1e749f67|  ubuntu/images/hvm-ssd/ubuntu-trusty-14.04-amd64-server-20170727  |  x86_64  |
+|  ami-785db401|  ubuntu/images/hvm-ssd/ubuntu-xenial-16.04-amd64-server-20170721  |  x86_64  |
++--------------+-------------------------------------------------------------------+----------+
+
+# instance types: family + generation + size
+$ awslocal ec2 describe-instance-types --instance-types t3.micro t3.large m5.xlarge c5.2xlarge r5.large --query 'InstanceTypes[].[InstanceType,VCpuInfo.DefaultVCpus,MemoryInfo.SizeInMiB]' --output table
+------------------------------
+|    DescribeInstanceTypes   |
++-------------+----+---------+
+|  c5.2xlarge |  8 |  16384  |
+|  m5.xlarge  |  4 |  16384  |
+|  r5.large   |  2 |  16384  |
+|  t3.large   |  2 |  8192   |
+|  t3.micro   |  2 |  1024   |
++-------------+----+---------+
+
+# key pair: AWS keeps the public half, you get the private half ONCE
+$ awslocal ec2 create-key-pair --key-name research-key --query 'KeyMaterial' --output text > research-key.pem && chmod 400 research-key.pem && head -1 research-key.pem && ls -l research-key.pem | awk '{print $1, $NF}'
+-----BEGIN RSA PRIVATE KEY-----
+-r--------@ research-key.pem
+
+$ awslocal ec2 describe-key-pairs --key-names research-key --query 'KeyPairs[].[KeyName,KeyFingerprint]' --output text
+research-key	62:ea:c0:68:b9:a1:5b:b1:ee:a1:69:f0:c9:a9:fb:d2:bb:4d:04:ef
+
+# security group: a stateful firewall attached to the instance's network interface
+$ awslocal ec2 create-security-group --group-name research-web-sg --description 'web: 22 from one IP, 80 from anywhere' --query GroupId --output text
+sg-0141c9c4729b69695
+
+$ SG=$(awslocal ec2 describe-security-groups --group-names research-web-sg --query 'SecurityGroups[0].GroupId' --output text)
+awslocal ec2 authorize-security-group-ingress --group-id $SG --protocol tcp --port 22 --cidr 203.0.113.10/32 --query 'SecurityGroupRules[].[IpProtocol,FromPort,CidrIpv4]' --output text
+awslocal ec2 authorize-security-group-ingress --group-id $SG --protocol tcp --port 80 --cidr 0.0.0.0/0 --query 'SecurityGroupRules[].[IpProtocol,FromPort,CidrIpv4]' --output text
+tcp	22	203.0.113.10/32
+tcp	80	0.0.0.0/0
+
+$ awslocal ec2 describe-security-groups --group-names research-web-sg --query 'SecurityGroups[0].{in:IpPermissions[].[FromPort,IpRanges[0].CidrIp],out:IpPermissionsEgress[].[IpProtocol,IpRanges[0].CidrIp]}' --output json
+{
+    "in": [
+        [
+            22,
+            "203.0.113.10/32"
+        ],
+        [
+            80,
+            "0.0.0.0/0"
+        ]
+    ],
+    "out": [
+        [
+            "-1",
+            "0.0.0.0/0"
+        ]
+    ]
+}
+
+# launch: AMI + type + key + SG
+$ AMI=$(awslocal ec2 describe-images --filters 'Name=name,Values=ubuntu*' --query 'Images[0].ImageId' --output text)
+awslocal ec2 run-instances --image-id $AMI --instance-type t3.micro --key-name research-key --security-groups research-web-sg --count 1 --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=research-web}]' --query 'Instances[0].[InstanceId,State.Name,InstanceType]' --output text
+i-fd2b36145f2fa992a	pending	t3.micro
+
+$ ID=$(awslocal ec2 describe-instances --filters Name=tag:Name,Values=research-web Name=instance-state-name,Values=pending,running --query 'Reservations[0].Instances[0].InstanceId' --output text)
+awslocal ec2 describe-instances --instance-ids $ID --query 'Reservations[0].Instances[0].{id:InstanceId,state:State.Name,privateIp:PrivateIpAddress,publicIp:PublicIpAddress,privateDns:PrivateDnsName,subnet:SubnetId,rootDevice:RootDeviceName}' --output json
+{
+    "id": "i-fd2b36145f2fa992a",
+    "state": "running",
+    "privateIp": "10.150.115.112",
+    "publicIp": "54.214.69.239",
+    "privateDns": "ip-10-150-115-112.ec2.internal",
+    "subnet": "subnet-f74bec6ce228388c8",
+    "rootDevice": "/dev/sda1"
+}
+
+# EBS: the root volume, plus a second data volume created and attached separately
+$ awslocal ec2 describe-volumes --query 'Volumes[].[VolumeId,Size,VolumeType,State,Attachments[0].Device]' --output table
+--------------------------------------------------------------
+|                       DescribeVolumes                      |
++------------------------+----+------+---------+-------------+
+|  vol-0dbb8f846e8d3d1d6 |  8 |  gp2 |  in-use |  /dev/sda1  |
++------------------------+----+------+---------+-------------+
+
+$ AZ=$(awslocal ec2 describe-instances --filters Name=tag:Name,Values=research-web --query 'Reservations[0].Instances[0].Placement.AvailabilityZone' --output text); echo AZ=$AZ
+VOL=$(awslocal ec2 create-volume --availability-zone $AZ --size 20 --volume-type gp3 --query VolumeId --output text); echo created $VOL
+ID=$(awslocal ec2 describe-instances --filters Name=tag:Name,Values=research-web --query 'Reservations[0].Instances[0].InstanceId' --output text)
+awslocal ec2 attach-volume --volume-id $VOL --instance-id $ID --device /dev/sdf --query '[Device,State]' --output text
+AZ=us-east-1a
+created vol-b78515a4e2660568e
+/dev/sdf	attaching
+
+$ awslocal ec2 describe-volumes --query 'Volumes[].[VolumeId,Size,VolumeType,State,Attachments[0].Device]' --output table
+---------------------------------------------------------------
+|                       DescribeVolumes                       |
++------------------------+-----+------+---------+-------------+
+|  vol-0dbb8f846e8d3d1d6 |  8  |  gp2 |  in-use |  /dev/sda1  |
+|  vol-b78515a4e2660568e |  20 |  gp3 |  in-use |  /dev/sdf   |
++------------------------+-----+------+---------+-------------+
+
+# lifecycle: running -> stopped -> running -> terminated
+$ ID=$(awslocal ec2 describe-instances --filters Name=tag:Name,Values=research-web --query 'Reservations[0].Instances[0].InstanceId' --output text)
+awslocal ec2 stop-instances --instance-ids $ID --query 'StoppingInstances[0].[PreviousState.Name,CurrentState.Name]' --output text
+awslocal ec2 describe-instances --instance-ids $ID --query 'Reservations[0].Instances[0].State.Name' --output text
+awslocal ec2 start-instances --instance-ids $ID --query 'StartingInstances[0].[PreviousState.Name,CurrentState.Name]' --output text
+awslocal ec2 describe-instances --instance-ids $ID --query 'Reservations[0].Instances[0].State.Name' --output text
+awslocal ec2 terminate-instances --instance-ids $ID --query 'TerminatingInstances[0].[PreviousState.Name,CurrentState.Name]' --output text
+running	stopping
+stopped
+stopped	pending
+running
+running	shutting-down
+
+$ awslocal ec2 describe-instances --filters Name=tag:Name,Values=research-web --query 'Reservations[].Instances[].[InstanceId,State.Name]' --output text
+i-fd2b36145f2fa992a	terminated
+
+# is anything really running? LocalStack community EC2 is a mock: no VM, no container, nothing to SSH into
+$ docker ps --format '{{.Names}}  {{.Image}}' | grep -iv minikube
+localstack  localstack/localstack:4.14.0
+sst-mess-db  postgres:17-alpine
+booking-prod-db  postgres:16-alpine
+
+# cleanup
+$ for v in $(awslocal ec2 describe-volumes --filters Name=size,Values=20 --query 'Volumes[].VolumeId' --output text); do awslocal ec2 detach-volume --volume-id $v >/dev/null 2>&1; awslocal ec2 delete-volume --volume-id $v && echo deleted $v; done
+awslocal ec2 delete-security-group --group-name research-web-sg && echo deleted sg
+awslocal ec2 delete-key-pair --key-name research-key --query Return --output text; rm -f research-key.pem
+deleted vol-b78515a4e2660568e
+deleted sg
+True
+
+# after terminate: the root volume had DeleteOnTermination=true, so it went with the instance
+$ awslocal ec2 describe-volumes --query 'Volumes[].[VolumeId,Size,State]' --output text; echo "volumes: $(awslocal ec2 describe-volumes --query 'length(Volumes)')"
+volumes: 0
+
+# public vs private IP across a stop/start: the private IP stays, the auto-assigned public IP is released
+$ AMI=$(awslocal ec2 describe-images --filters 'Name=name,Values=ubuntu*' --query 'Images[0].ImageId' --output text)
+ID=$(awslocal ec2 run-instances --image-id $AMI --instance-type t3.micro --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=research-ip}]' --query 'Instances[0].InstanceId' --output text)
+q() { awslocal ec2 describe-instances --instance-ids $ID --query 'Reservations[0].Instances[0].[State.Name,PrivateIpAddress,PublicIpAddress]' --output text; }
+echo "before stop : $(q)"
+awslocal ec2 stop-instances --instance-ids $ID >/dev/null; echo "stopped     : $(q)"
+awslocal ec2 start-instances --instance-ids $ID >/dev/null; echo "after start : $(q)"
+awslocal ec2 terminate-instances --instance-ids $ID >/dev/null; echo "terminated  : $(q)"
+before stop : running	10.41.196.65	54.214.202.211
+stopped     : stopped	10.41.196.65	None
+after start : running	10.41.196.65	54.214.69.232
+terminated  : terminated	10.41.196.65	None
+

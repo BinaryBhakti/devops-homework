@@ -1,0 +1,154 @@
+########## IAM — users, groups, policies, roles (LocalStack 4.14.0) ##########
+
+$ awslocal sts get-caller-identity
+{
+    "UserId": "AKIAIOSFODNN7EXAMPLE",
+    "Account": "000000000000",
+    "Arn": "arn:aws:iam::000000000000:root"
+}
+
+# a group, a user, and the user in the group
+$ awslocal iam create-group --group-name research-developers --query 'Group.Arn' --output text
+arn:aws:iam::000000000000:group/research-developers
+
+$ awslocal iam create-user --user-name research-alice --query 'User.Arn' --output text
+arn:aws:iam::000000000000:user/research-alice
+
+$ awslocal iam add-user-to-group --group-name research-developers --user-name research-alice
+
+$ awslocal iam get-group --group-name research-developers --query 'Users[].UserName' --output text
+research-alice
+
+# a least-privilege customer-managed policy: list ONE bucket, read objects in it, nothing else
+$ cat research-s3-read.json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListOneBucket",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::research-reports"
+    },
+    {
+      "Sid": "ReadObjectsInThatBucket",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::research-reports/*"
+    }
+  ]
+}
+
+$ awslocal iam create-policy --policy-name research-s3-read-reports --policy-document file://research-s3-read.json --query 'Policy.[PolicyName,Arn,DefaultVersionId]' --output text
+research-s3-read-reports	arn:aws:iam::000000000000:policy/research-s3-read-reports	v1
+
+# attach it to the GROUP, not the user — alice inherits it
+$ awslocal iam attach-group-policy --group-name research-developers --policy-arn arn:aws:iam::000000000000:policy/research-s3-read-reports
+
+$ awslocal iam list-attached-group-policies --group-name research-developers --output table
+-------------------------------------------------------------------------------
+|                          ListAttachedGroupPolicies                          |
++-----------------------------------------------------------------------------+
+||                             AttachedPolicies                              ||
+|+------------+--------------------------------------------------------------+|
+||  PolicyArn |  arn:aws:iam::000000000000:policy/research-s3-read-reports   ||
+||  PolicyName|  research-s3-read-reports                                    ||
+|+------------+--------------------------------------------------------------+|
+
+$ awslocal iam list-attached-user-policies --user-name research-alice --output table
+--------------------------
+|ListAttachedUserPolicies|
++------------------------+
+
+# a role for EC2: the trust policy says WHO may assume it, the permission policy says WHAT it may do
+$ cat research-ec2-trust.json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": { "Service": "ec2.amazonaws.com" },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+
+$ awslocal iam create-role --role-name research-ec2-app --assume-role-policy-document file://research-ec2-trust.json --query 'Role.[RoleName,Arn]' --output text
+research-ec2-app	arn:aws:iam::000000000000:role/research-ec2-app
+
+$ awslocal iam attach-role-policy --role-name research-ec2-app --policy-arn arn:aws:iam::000000000000:policy/research-s3-read-reports
+
+$ awslocal iam list-attached-role-policies --role-name research-ec2-app --output table
+-------------------------------------------------------------------------------
+|                          ListAttachedRolePolicies                           |
++-----------------------------------------------------------------------------+
+||                             AttachedPolicies                              ||
+|+------------+--------------------------------------------------------------+|
+||  PolicyArn |  arn:aws:iam::000000000000:policy/research-s3-read-reports   ||
+||  PolicyName|  research-s3-read-reports                                    ||
+|+------------+--------------------------------------------------------------+|
+
+# an instance profile is the wrapper EC2 uses to hand the role to an instance
+$ awslocal iam create-instance-profile --instance-profile-name research-ec2-app --query 'InstanceProfile.Arn' --output text
+arn:aws:iam::000000000000:instance-profile/research-ec2-app
+
+$ awslocal iam add-role-to-instance-profile --instance-profile-name research-ec2-app --role-name research-ec2-app
+
+# assuming the role returns TEMPORARY credentials with an expiry — no long-lived key
+$ awslocal sts assume-role --role-arn arn:aws:iam::000000000000:role/research-ec2-app --role-session-name demo --query 'Credentials.[AccessKeyId,Expiration]' --output text
+LSIAQAAAAAAALZKNJQMT	2026-10-07T16:42:00.166234Z
+
+# ask IAM to evaluate the policy for alice: two granted actions and one never granted
+$ awslocal iam simulate-principal-policy --policy-source-arn arn:aws:iam::000000000000:user/research-alice --action-names s3:GetObject s3:ListBucket s3:DeleteObject --resource-arns 'arn:aws:s3:::research-reports/q3.csv' --query 'EvaluationResults[].[EvalActionName,EvalDecision]' --output table
+-------------------------------------
+|      SimulatePrincipalPolicy      |
++------------------+----------------+
+|  s3:GetObject    |  explicitDeny  |
+|  s3:ListBucket   |  explicitDeny  |
+|  s3:DeleteObject |  explicitDeny  |
++------------------+----------------+
+
+# evaluate a raw policy document directly, with no principal
+$ awslocal iam simulate-custom-policy --policy-input-list file://research-s3-read.json --action-names s3:GetObject s3:DeleteObject --resource-arns 'arn:aws:s3:::research-reports/q3.csv' --query 'EvaluationResults[].[EvalActionName,EvalDecision]' --output table
+
+An error occurred (InternalFailure) when calling the SimulateCustomPolicy operation: The simulate_custom_policy action has not been implemented
+
+# access keys for a human user — the long-lived credential best practice says to avoid
+$ awslocal iam create-access-key --user-name research-alice --query 'AccessKey.[UserName,Status]' --output text
+research-alice	Active
+
+# is the policy actually ENFORCED? act as alice (her own access key) and try something it never granted
+$ awslocal s3 mb s3://research-reports && echo 'q3 numbers' | awslocal s3 cp - s3://research-reports/q3.csv
+make_bucket: research-reports
+
+$ AWS_ACCESS_KEY_ID=$ALICE_KEY AWS_SECRET_ACCESS_KEY=$ALICE_SECRET awslocal sts get-caller-identity --query Arn --output text
+arn:aws:iam::000000000000:user/research-alice
+
+$ AWS_ACCESS_KEY_ID=$ALICE_KEY AWS_SECRET_ACCESS_KEY=$ALICE_SECRET awslocal s3 rm s3://research-reports/q3.csv
+delete: s3://research-reports/q3.csv
+
+$ awslocal s3 ls s3://research-reports/ || true; echo "objects left: $(awslocal s3api list-objects-v2 --bucket research-reports --query 'KeyCount' --output text)"
+objects left: None
+
+# the delete succeeded — LocalStack community stores IAM policies but does not enforce them (ENFORCE_IAM is a Pro feature).
+# on real AWS this call returns AccessDenied, because no statement allows s3:DeleteObject.
+# cleanup — detach before delete, in reverse order of creation
+$ awslocal s3 rb s3://research-reports --force
+remove_bucket: research-reports
+
+$ for k in $(awslocal iam list-access-keys --user-name research-alice --query 'AccessKeyMetadata[].AccessKeyId' --output text); do awslocal iam delete-access-key --user-name research-alice --access-key-id $k; done
+awslocal iam remove-role-from-instance-profile --instance-profile-name research-ec2-app --role-name research-ec2-app
+awslocal iam delete-instance-profile --instance-profile-name research-ec2-app
+awslocal iam detach-role-policy --role-name research-ec2-app --policy-arn arn:aws:iam::000000000000:policy/research-s3-read-reports
+awslocal iam delete-role --role-name research-ec2-app
+awslocal iam detach-group-policy --group-name research-developers --policy-arn arn:aws:iam::000000000000:policy/research-s3-read-reports
+awslocal iam remove-user-from-group --group-name research-developers --user-name research-alice
+awslocal iam delete-user --user-name research-alice
+awslocal iam delete-group --group-name research-developers
+awslocal iam delete-policy --policy-arn arn:aws:iam::000000000000:policy/research-s3-read-reports && echo 'IAM cleanup done'
+IAM cleanup done
+
+$ awslocal iam list-users --query 'length(Users)'; awslocal iam list-policies --scope Local --query 'length(Policies)'
+0
+0
+
