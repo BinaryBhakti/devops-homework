@@ -1,0 +1,134 @@
+########## HOMEWORK 16 — proving the gate BLOCKS: two deliberate violations, one at a time ##########
+
+# start from the passing reports of the previous run
+$ rm -rf reports-demo && cp -R reports reports-demo && python3 security/gate.py reports-demo | head -1
+## Security gate: PASSED
+
+# DEMO A — SCA: pin Flask to 2.2.0, a release with a known HIGH advisory (CVE-2023-30861, session cookie disclosure)
+$ sed -i.bak 's/^Flask==3.1.3$/Flask==2.2.0/' requirements.txt && cat requirements.txt
+Flask==2.2.0
+gunicorn==26.2.0
+
+$ docker run --rm --cpus=1 -v "$PWD":/src -w /src -e PIP_ROOT_USER_ACTION=ignore -e PIP_DISABLE_PIP_VERSION_CHECK=1 python:3.12-slim sh -c 'pip install -q pip-audit==2.10.1 && pip-audit -r requirements.txt --progress-spinner off --format json --output reports-demo/pip-audit.json; pip-audit -r requirements.txt --progress-spinner off'
+Found 4 known vulnerabilities in 1 package
+Found 4 known vulnerabilities in 1 package
+Name  Version ID              Fix Versions
+----- ------- --------------- ------------
+flask 2.2.0   PYSEC-2023-62   2.2.5,2.3.2
+flask 2.2.0   PYSEC-2023-62   2.2.5,2.3.2
+flask 2.2.0   PYSEC-2026-2151 3.1.3
+flask 2.2.0   PYSEC-2026-2151 3.1.3
+
+$ trivy fs --quiet --skip-db-update --parallel 1 --scanners vuln --format json --output reports-demo/trivy-fs.json . && trivy fs --quiet --skip-db-update --parallel 1 --scanners vuln --severity HIGH,CRITICAL . | sed -n '/^requirements.txt/,$p' | head -14
+requirements.txt (pip)
+======================
+Total: 1 (HIGH: 1, CRITICAL: 0)
+
+┌─────────┬────────────────┬──────────┬────────┬───────────────────┬───────────────┬────────────────────────────────────────────────────────────┐
+│ Library │ Vulnerability  │ Severity │ Status │ Installed Version │ Fixed Version │                           Title                            │
+├─────────┼────────────────┼──────────┼────────┼───────────────────┼───────────────┼────────────────────────────────────────────────────────────┤
+│ Flask   │ CVE-2023-30861 │ HIGH     │ fixed  │ 2.2.0             │ 2.3.2, 2.2.5  │ flask: Possible disclosure of permanent session cookie due │
+│         │                │          │        │                   │               │ to missing Vary: Cookie...                                 │
+│         │                │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2023-30861                 │
+└─────────┴────────────────┴──────────┴────────┴───────────────────┴───────────────┴────────────────────────────────────────────────────────────┘
+
+$ python3 security/gate.py reports-demo; echo "gate exit code: $?"
+## Security gate: BLOCKED
+
+| scanner | policy (block at) | findings | blocking | result |
+|---|---|---|---|---|
+| bandit | HIGH | 0 | 0 | pass |
+| semgrep | ERROR | 0 | 0 | pass |
+| pip_audit | ANY | 4 | 4 | BLOCK |
+| trivy_fs | HIGH | 2 | 1 | BLOCK |
+| trivy_config | HIGH | 1 | 0 | pass |
+| gitleaks | ANY | 0 | 0 | pass |
+| trivy_image | HIGH | 165 | 0 | pass |
+
+### Blocking findings
+
+| scanner | severity | finding |
+|---|---|---|
+| pip_audit | VULN | `flask==2.2.0 PYSEC-2023-62 (fix: 2.2.5,2.3.2)` |
+| pip_audit | VULN | `flask==2.2.0 PYSEC-2023-62 (fix: 2.2.5,2.3.2)` |
+| pip_audit | VULN | `flask==2.2.0 PYSEC-2026-2151 (fix: 3.1.3)` |
+| pip_audit | VULN | `flask==2.2.0 PYSEC-2026-2151 (fix: 3.1.3)` |
+| trivy_fs | HIGH | `Flask CVE-2023-30861 fix=2.3.2, 2.2.5` |
+gate exit code: 1
+
+# a non-zero exit from the gate job means push-image and deploy never start
+$ mv requirements.txt.bak requirements.txt && cat requirements.txt && cp reports/pip-audit.json reports/trivy-fs.json reports-demo/
+Flask==3.1.3
+gunicorn==26.2.0
+
+# DEMO B — secret scan: commit-style mistake, a live token for this project pasted into the code
+$ printf "API_TOKEN = \"hw16_live_%s\"\n" "$(LC_ALL=C tr -dc a-z0-9 </dev/urandom | head -c 24)" > app/local_settings.py && sed -E "s/(hw16_live_).{20}/\1********************/" app/local_settings.py
+API_TOKEN = "hw16_live_********************p0hy"
+
+$ gitleaks dir . --config .gitleaks.toml --no-banner --redact --report-format json --report-path reports-demo/gitleaks.json --exit-code 0 2>&1 | tail -2; python3 -c "import json; [print(f[\"RuleID\"], f[\"File\"], \"line\", f[\"StartLine\"], f[\"Secret\"]) for f in json.load(open(\"reports-demo/gitleaks.json\"))]"
+11:52PM INF scanned ~2223161 bytes (2.22 MB) in 1.58s
+11:52PM WRN leaks found: 5
+hw16-demo-api-token app/local_settings.py line 1 REDACTED
+generic-api-key reports/trivy-image.json line 63 REDACTED
+generic-api-key reports/trivy-image.json line 198 REDACTED
+generic-api-key reports-demo/trivy-image.json line 63 REDACTED
+generic-api-key reports-demo/trivy-image.json line 198 REDACTED
+
+$ python3 security/gate.py reports-demo; echo "gate exit code: $?"
+## Security gate: BLOCKED
+
+| scanner | policy (block at) | findings | blocking | result |
+|---|---|---|---|---|
+| bandit | HIGH | 0 | 0 | pass |
+| semgrep | ERROR | 0 | 0 | pass |
+| pip_audit | ANY | 0 | 0 | pass |
+| trivy_fs | HIGH | 0 | 0 | pass |
+| trivy_config | HIGH | 1 | 0 | pass |
+| gitleaks | ANY | 5 | 5 | BLOCK |
+| trivy_image | HIGH | 165 | 0 | pass |
+
+### Blocking findings
+
+| scanner | severity | finding |
+|---|---|---|
+| gitleaks | SECRET | `hw16-demo-api-token app/local_settings.py:1` |
+| gitleaks | SECRET | `generic-api-key reports/trivy-image.json:63` |
+| gitleaks | SECRET | `generic-api-key reports/trivy-image.json:198` |
+| gitleaks | SECRET | `generic-api-key reports-demo/trivy-image.json:63` |
+| gitleaks | SECRET | `generic-api-key reports-demo/trivy-image.json:198` |
+gate exit code: 1
+
+$ rm app/local_settings.py && rm -rf reports-demo && git -C .. status --short -- 16-devsecops/app 16-devsecops/requirements.txt | head -3; echo "workspace restored"
+?? 16-devsecops/app/
+?? 16-devsecops/requirements.txt
+workspace restored
+
+# FOLLOW-UP — the four generic-api-key hits above are false positives: Trivy JSON copies the python base image's ENV GPG_KEY
+$ sed -n '63p' reports/trivy-image.json | cut -c1-80
+          "created_by": "ENV GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+
+# that is the public CPython release-signing key fingerprint. reports/ is gitignored (CI scans git history, so never sees it); allowlist it for local dir scans
+$ tail -4 .gitleaks.toml
+# `ENV GPG_KEY=...` (the public CPython release-signing key fingerprint), a generic-api-key false positive.
+[allowlist]
+description = "generated scanner reports"
+paths = ['''(^|/)reports(-demo)?/''']
+
+$ gitleaks dir . --config .gitleaks.toml --no-banner --redact --exit-code 1 2>&1 | tail -1; echo "gitleaks exit code: $?"
+11:53PM WRN leaks found: 1
+gitleaks exit code: 0
+
+# one hit left: this transcript now quotes the GPG_KEY line, and outputs/ IS committed — CI would block on it. Allowlist the exact public value instead of a path
+$ tail -7 .gitleaks.toml
+# `ENV GPG_KEY=...` (the public CPython release-signing key fingerprint), a generic-api-key false positive.
+[allowlist]
+description = "generated scanner reports, and one known public value"
+paths = ['''(^|/)reports(-demo)?/''']
+# The CPython release manager's public OpenPGP key fingerprint (python base image ENV GPG_KEY).
+# Allowlisted by exact value, not by file, so a real key in the same file would still be caught.
+regexes = ['''^7169605F62C751356D054A26A821E680E5FA6305$''']
+
+$ gitleaks dir . --config .gitleaks.toml --no-banner --redact --exit-code 1 2>&1 | tail -1; echo "gitleaks exit code: ${PIPESTATUS[0]}"
+11:54PM INF no leaks found
+gitleaks exit code: 0
+

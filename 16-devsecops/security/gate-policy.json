@@ -1,0 +1,10 @@
+{
+  "_comment": "Security gate policy for Homework 16. A finding at or above block_at fails the pipeline; everything else is reported only.",
+  "bandit":       { "block_at": "HIGH",  "min_confidence": "MEDIUM" },
+  "semgrep":      { "block_at": "ERROR" },
+  "pip_audit":    { "block_at": "ANY" },
+  "trivy_fs":     { "block_at": "HIGH" },
+  "trivy_config": { "block_at": "HIGH" },
+  "gitleaks":     { "block_at": "ANY" },
+  "trivy_image":  { "block_at": "HIGH", "only_if_fix_available": true }
+}

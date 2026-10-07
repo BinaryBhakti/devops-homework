@@ -1,0 +1,43 @@
+########## HOMEWORK 16 — stage 2 re-run: the unit-test step above failed on a PyPI download, not on a test ##########
+
+# the error was pip, not pytest: "No matching distribution found for coverage" = the index was unreachable from the container at that moment
+# in CI the needs: chain would have stopped right there; locally the script carried on. Re-run the stage with pip retries:
+$ docker run --rm --cpus=1 -v "$PWD":/src -w /src -e PIP_ROOT_USER_ACTION=ignore -e PIP_DISABLE_PIP_VERSION_CHECK=1 python:3.12-slim sh -c 'pip install -q --retries 10 --timeout 60 -r requirements-dev.txt && pytest -v -p no:cacheprovider --cov=app --cov-report=term-missing --cov-fail-under=85'
+============================= test session starts ==============================
+platform linux -- Python 3.12.15, pytest-9.1.1, pluggy-1.6.0 -- /usr/local/bin/python3.12
+rootdir: /src
+configfile: pytest.ini
+testpaths: tests
+plugins: cov-7.1.0
+collecting ... collected 17 items
+
+tests/test_app.py::test_home PASSED                                      [  5%]
+tests/test_app.py::test_health PASSED                                    [ 11%]
+tests/test_app.py::test_greet PASSED                                     [ 17%]
+tests/test_app.py::test_add_numbers PASSED                               [ 23%]
+tests/test_app.py::test_add_numbers_missing_fields PASSED                [ 29%]
+tests/test_app.py::test_calculator_multiply PASSED                       [ 35%]
+tests/test_app.py::test_calculator_divide_by_zero PASSED                 [ 41%]
+tests/test_app.py::test_status PASSED                                    [ 47%]
+tests/test_app.py::test_security_headers_on_every_response PASSED        [ 52%]
+tests/test_app.py::test_pipeline_run_happy_path PASSED                   [ 58%]
+tests/test_app.py::test_pipeline_rejects_html_in_branch PASSED           [ 64%]
+tests/test_app.py::test_pipeline_rejects_bad_fail_chance[abc] PASSED     [ 70%]
+tests/test_app.py::test_pipeline_rejects_bad_fail_chance[1.5] PASSED     [ 76%]
+tests/test_app.py::test_pipeline_rejects_bad_fail_chance[-0.1] PASSED    [ 82%]
+tests/test_app.py::test_pipeline_rejects_bad_fail_chance[None] PASSED    [ 88%]
+tests/test_app.py::test_calculator_unknown_operation PASSED              [ 94%]
+tests/test_app.py::test_unknown_route_is_json_404 PASSED                 [100%]
+
+================================ tests coverage ================================
+_______________ coverage: platform linux, python 3.12.15-final-0 _______________
+
+Name              Stmts   Miss  Cover   Missing
+-----------------------------------------------
+app/__init__.py       0      0   100%
+app/app.py          122     14    89%   124, 134-135, 151, 158, 162-163, 225-226, 228-230, 267, 272
+-----------------------------------------------
+TOTAL               122     14    89%
+Required test coverage of 85% reached. Total coverage: 88.52%
+============================= 17 passed in 12.99s ==============================
+

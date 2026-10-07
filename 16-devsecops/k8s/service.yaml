@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: hw16-devsecops
+  namespace: hw16
+spec:
+  type: ClusterIP
+  selector:
+    app: hw16-devsecops
+  ports:
+    - port: 80
+      targetPort: 5001

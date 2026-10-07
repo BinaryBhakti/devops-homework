@@ -1,0 +1,14 @@
+# Project-specific Semgrep rules, run alongside the p/python and p/flask registry packs.
+rules:
+  - id: hw16-no-flask-debug-run
+    languages: [python]
+    severity: ERROR
+    message: >-
+      app.run(debug=True) exposes the Werkzeug debugger (remote code execution).
+      Serve with gunicorn; enable debug only via FLASK_DEBUG in a local shell.
+    pattern: $APP.run(..., debug=True, ...)
+  - id: hw16-no-subprocess-shell
+    languages: [python]
+    severity: ERROR
+    message: subprocess with shell=True turns any user input into a command-injection sink.
+    pattern: subprocess.$FUNC(..., shell=True, ...)

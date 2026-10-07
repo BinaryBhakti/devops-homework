@@ -1,0 +1,23 @@
+# gitleaks config for Homework 16: the default ruleset, plus one custom rule for this
+# project's (fictional) API token format. The custom rule is what the gate-blocking
+# demo uses, so the demo never has to put a real-looking cloud key into Git history.
+title = "hw16 gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "hw16-demo-api-token"
+description = "Homework 16 demo API token"
+regex = '''hw16_live_[a-z0-9]{24}'''
+keywords = ["hw16_live_"]
+
+# Local scanner output is gitignored and never committed, so CI's `gitleaks git` never sees it.
+# Allowlisted for local `gitleaks dir` runs: Trivy's image report copies the python base image's
+# `ENV GPG_KEY=...` (the public CPython release-signing key fingerprint), a generic-api-key false positive.
+[allowlist]
+description = "generated scanner reports, and one known public value"
+paths = ['''(^|/)reports(-demo)?/''']
+# The CPython release manager's public OpenPGP key fingerprint (python base image ENV GPG_KEY).
+# Allowlisted by exact value, not by file, so a real key in the same file would still be caught.
+regexes = ['''^7169605F62C751356D054A26A821E680E5FA6305$''']

@@ -1,0 +1,15 @@
+.venv
+__pycache__
+.pytest_cache
+.coverage
+junit.xml
+reports
+tests
+outputs
+screenshots
+security
+k8s
+*.md
+.gitleaks.toml
+.semgrep.yml
+.trivyignore*

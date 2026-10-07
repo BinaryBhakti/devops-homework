@@ -1,0 +1,110 @@
+########## HOMEWORK 16 — AFTER hardening: every pipeline stage run locally, in workflow order ##########
+
+# containers run with --cpus=1 and trivy with --parallel 1: the laptop is shared with a 2-node minikube
+# 1 · BUILD — install runtime deps, compile, import
+$ docker run --rm --cpus=1 -v "$PWD":/src -w /src -e PIP_ROOT_USER_ACTION=ignore -e PIP_DISABLE_PIP_VERSION_CHECK=1 python:3.12-slim sh -c 'pip install -q -r requirements.txt && python -m compileall -q app && python -c "from app.app import app; print(\"routes:\", sorted(r.rule for r in app.url_map.iter_rules()))"'
+routes: ['/', '/api/add', '/api/calculate', '/api/greet/<name>', '/api/pipeline/run', '/api/status', '/health', '/static/<path:filename>']
+
+# 2 · UNIT TEST
+$ docker run --rm --cpus=1 -v "$PWD":/src -w /src -e PIP_ROOT_USER_ACTION=ignore -e PIP_DISABLE_PIP_VERSION_CHECK=1 python:3.12-slim sh -c 'pip install -q -r requirements-dev.txt && pytest -q -p no:cacheprovider --cov=app --cov-report=term-missing --cov-fail-under=85'
+ERROR: Could not find a version that satisfies the requirement coverage>=7.10.6 (from pytest-cov) (from versions: none)
+ERROR: No matching distribution found for coverage>=7.10.6
+
+# 3 · SAST — Bandit, Semgrep (registry packs + .semgrep.yml), Trivy IaC
+$ docker run --rm --cpus=1 -v "$PWD":/src -w /src -e PIP_ROOT_USER_ACTION=ignore -e PIP_DISABLE_PIP_VERSION_CHECK=1 python:3.12-slim sh -c 'pip install -q "bandit[sarif]==1.9.4" && bandit -q -r app -f json -o reports/bandit.json --exit-zero; bandit -r app -f txt --exit-zero | sed -n "/Test results/,/Files skipped/p"'
+[main]	INFO	profile include tests: None
+[main]	INFO	profile exclude tests: None
+[main]	INFO	cli include tests: None
+[main]	INFO	cli exclude tests: None
+[main]	INFO	running on Python 3.12.15
+Test results:
+	No issues identified.
+
+Code scanned:
+	Total lines of code: 193
+	Total lines skipped (#nosec): 0
+	Total potential issues skipped due to specifically being disabled (e.g., #nosec BXXX): 0
+
+Run metrics:
+	Total issues (by severity):
+		Undefined: 0
+		Low: 0
+		Medium: 0
+		High: 0
+	Total issues (by confidence):
+		Undefined: 0
+		Low: 0
+		Medium: 0
+		High: 0
+Files skipped (0):
+
+$ docker run --rm --cpus=1 -v "$PWD":/src -w /src semgrep/semgrep:latest semgrep scan --config p/python --config p/flask --config .semgrep.yml --metrics=off --quiet --json-output=reports/semgrep.json app; echo "semgrep findings: $(python3 -c "import json;print(len(json.load(open(\"reports/semgrep.json\"))[\"results\"]))")"
+semgrep findings: 0
+
+$ trivy config --quiet --format json --output reports/trivy-config.json . && trivy config --quiet . | sed -n '/Report Summary/,/^Legend/p;/^Failures/p;/^KSV/p;/^DS-/p'
+Report Summary
+
+┌─────────────────────┬────────────┬───────────────────┐
+│       Target        │    Type    │ Misconfigurations │
+├─────────────────────┼────────────┼───────────────────┤
+│ Dockerfile          │ dockerfile │         0         │
+├─────────────────────┼────────────┼───────────────────┤
+│ k8s/deployment.yaml │ kubernetes │         1         │
+├─────────────────────┼────────────┼───────────────────┤
+│ k8s/namespace.yaml  │ kubernetes │         0         │
+├─────────────────────┼────────────┼───────────────────┤
+│ k8s/service.yaml    │ kubernetes │         0         │
+└─────────────────────┴────────────┴───────────────────┘
+Legend:
+Failures: 1 (UNKNOWN: 0, LOW: 0, MEDIUM: 1, HIGH: 0, CRITICAL: 0)
+KSV-0125 (MEDIUM): Container app in deployment hw16-devsecops (namespace: hw16) uses an image from an untrusted registry.
+
+# 4 · SCA — pip-audit (both requirement files) and Trivy fs
+$ docker run --rm --cpus=1 -v "$PWD":/src -w /src -e PIP_ROOT_USER_ACTION=ignore -e PIP_DISABLE_PIP_VERSION_CHECK=1 python:3.12-slim sh -c 'pip install -q pip-audit==2.10.1 && pip-audit -r requirements.txt -r requirements-dev.txt --progress-spinner off --format json --output reports/pip-audit.json; pip-audit -r requirements.txt -r requirements-dev.txt --progress-spinner off'
+No known vulnerabilities found
+No known vulnerabilities found
+
+$ trivy fs --quiet --skip-db-update --parallel 1 --scanners vuln --format json --output reports/trivy-fs.json . && trivy fs --quiet --skip-db-update --parallel 1 --scanners vuln --severity HIGH,CRITICAL . | sed -n '/Report Summary/,/^Legend/p'
+Report Summary
+
+┌──────────────────┬──────┬─────────────────┐
+│      Target      │ Type │ Vulnerabilities │
+├──────────────────┼──────┼─────────────────┤
+│ requirements.txt │ pip  │        0        │
+└──────────────────┴──────┴─────────────────┘
+Legend:
+
+# 5 · SECRET SCAN — gitleaks with the project config (default rules + the hw16 token rule)
+$ gitleaks dir . --config .gitleaks.toml --no-banner --redact --report-format json --report-path reports/gitleaks.json --exit-code 0 2>&1; echo "report: $(cat reports/gitleaks.json)"
+11:36PM INF scanned ~519591 bytes (519.59 KB) in 204ms
+11:36PM INF no leaks found
+report: []
+
+# 6 · DOCKER BUILD
+$ docker build -q --build-arg GIT_SHA=local-after -t hw16-devsecops:local . && docker image ls hw16-devsecops:local --format "{{.Repository}}:{{.Tag}}  {{.Size}}" && docker run --rm --cpus=1 --entrypoint id hw16-devsecops:local
+sha256:beb94a1c58127f67358f0e11891f0dbf9c6d355fb196944a7f10a462506b6da0
+hw16-devsecops:local  213MB
+uid=10001(app) gid=10001(app) groups=10001(app)
+
+# 7 · CONTAINER IMAGE SCAN
+$ trivy image --quiet --skip-db-update --parallel 1 --format json --output reports/trivy-image.json hw16-devsecops:local && python3 -c 'import json,collections; r=json.load(open("reports/trivy-image.json")); c=collections.Counter((x["Severity"], "fix available" if x.get("FixedVersion") else "no fix yet") for t in r.get("Results",[]) for x in t.get("Vulnerabilities") or []); [print(k[0], k[1], v) for k,v in sorted(c.items())]'
+HIGH no fix yet 44
+LOW no fix yet 61
+MEDIUM no fix yet 58
+UNKNOWN no fix yet 2
+
+# 8 · SECURITY GATE — the same script the workflow runs, on these reports
+$ python3 security/gate.py reports; echo "gate exit code: $?"
+## Security gate: PASSED
+
+| scanner | policy (block at) | findings | blocking | result |
+|---|---|---|---|---|
+| bandit | HIGH | 0 | 0 | pass |
+| semgrep | ERROR | 0 | 0 | pass |
+| pip_audit | ANY | 0 | 0 | pass |
+| trivy_fs | HIGH | 0 | 0 | pass |
+| trivy_config | HIGH | 1 | 0 | pass |
+| gitleaks | ANY | 0 | 0 | pass |
+| trivy_image | HIGH | 165 | 0 | pass |
+gate exit code: 0
+

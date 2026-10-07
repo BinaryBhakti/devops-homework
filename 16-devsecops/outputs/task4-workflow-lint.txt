@@ -1,0 +1,29 @@
+########## HOMEWORK 16 — lint the workflow (actionlint + shellcheck on every run: block) ##########
+
+$ docker run --rm --cpus=1 -v "$PWD":/repo -w /repo rhysd/actionlint:latest -color=false .github/workflows/hw16-devsecops.yml && echo "actionlint: no problems found"
+actionlint: no problems found
+
+$ grep -nE "^  [a-z-]+:$|^    needs:|^    if:" .github/workflows/hw16-devsecops.yml
+12:  push:
+38:  run:
+43:  build:
+61:  unit-test:
+63:    needs: build
+81:  sast:
+83:    needs: unit-test
+123:  sca:
+125:    needs: sast
+151:  secret-scan:
+153:    needs: sca
+176:  docker-build:
+178:    needs: secret-scan
+202:  image-scan:
+204:    needs: docker-build
+226:  security-gate:
+228:    needs: [sast, sca, secret-scan, image-scan]
+240:  push-image:
+242:    needs: [security-gate, docker-build]
+243:    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+275:  deploy:
+277:    needs: push-image
+

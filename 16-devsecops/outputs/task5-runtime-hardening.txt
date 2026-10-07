@@ -1,0 +1,41 @@
+########## HOMEWORK 16 — does the image actually run under the restrictions the Deployment imposes? ##########
+
+# docker equivalents of the pod securityContext: read-only root FS, all capabilities dropped, no privilege escalation, non-root, only /tmp writable
+$ docker run -d --name hw16 --cpus=1 -p 15001:5001 --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 hw16-devsecops:local
+992e1fcb506290da5993b487bf0859f8efba3d92e70224b7c63a9b626e063e03
+
+$ for _ in $(seq 1 30); do s=$(docker inspect -f "{{.State.Health.Status}}" hw16); [ "$s" = healthy ] && break; sleep 1; done; echo "health: $s"
+health: starting
+
+$ curl -s localhost:15001/health; echo
+{"status":"healthy","timestamp":"2026-10-07T18:29:32.699166Z","uptime_seconds":16.87}
+
+
+$ curl -sI localhost:15001/ | grep -iE '^HTTP|content-security|x-content-type|x-frame|referrer'
+HTTP/1.1 200 OK
+Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-ancestors 'none'; base-uri 'self'
+X-Content-Type-Options: nosniff
+Referrer-Policy: no-referrer
+X-Frame-Options: DENY
+
+$ curl -s -X POST localhost:15001/api/pipeline/run -H 'Content-Type: application/json' -d '{"branch":"<img src=x onerror=alert(1)>"}' -w ' [HTTP %{http_code}]\n'
+{"error":"Invalid branch name"}
+ [HTTP 400]
+
+$ curl -s -X POST localhost:15001/api/pipeline/run -H 'Content-Type: application/json' -d '{"branch":"feature/x","fail_chance":0}' | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["branch"], d["overall_status"], len(d["stages"]), "stages")'
+feature/x passed 8 stages
+
+$ docker exec hw16 sh -c 'id; touch /app/x; touch /tmp/ok && echo "/tmp is writable"; python -m pip --version'
+uid=10001(app) gid=10001(app) groups=10001(app)
+touch: cannot touch '/app/x': Read-only file system
+/tmp is writable
+/opt/venv/bin/python: No module named pip
+
+$ docker logs hw16 2>&1 | grep -E "Booting worker|Listening" | head -3
+[2026-10-07 18:28:57 +0000] [1] [INFO] Listening at: http://0.0.0.0:5001 (1)
+[2026-10-07 18:28:57 +0000] [7] [INFO] Booting worker with pid: 7
+[2026-10-07 18:28:57 +0000] [8] [INFO] Booting worker with pid: 8
+
+$ docker rm -f hw16
+hw16
+

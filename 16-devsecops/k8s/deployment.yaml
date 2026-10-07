@@ -1,0 +1,60 @@
+# The deploy job replaces the whole image reference with
+# ghcr.io/binarybhakti/hw16-devsecops@sha256:... — the digest of the image that passed the gate.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hw16-devsecops
+  namespace: hw16
+  labels:
+    app: hw16-devsecops
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hw16-devsecops
+  template:
+    metadata:
+      labels:
+        app: hw16-devsecops
+    spec:
+      automountServiceAccountToken: false   # the app never talks to the Kubernetes API
+      imagePullSecrets:
+        - name: ghcr
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: ghcr.io/binarybhakti/hw16-devsecops:set-by-ci
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5001
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 192Mi
+          readinessProbe:
+            httpGet: { path: /health, port: 5001 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: 5001 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
