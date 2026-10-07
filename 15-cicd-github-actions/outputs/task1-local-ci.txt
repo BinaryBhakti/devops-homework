@@ -1,0 +1,103 @@
+########## HOMEWORK 15 — the CI stages, run locally exactly as the workflow runs them ##########
+
+# host python is 3.9, so every Python step runs in python:3.12-slim — the same version the workflow uses
+$ docker run --rm -v "$PWD":/src -w /src -e PIP_ROOT_USER_ACTION=ignore -e PIP_DISABLE_PIP_VERSION_CHECK=1 python:3.12-slim sh -c 'pip install -q -r requirements-dev.txt && python --version && ruff --version && ruff check . && ruff format --check .'
+Python 3.12.15
+ruff 0.16.10
+All checks passed!
+5 files already formatted
+
+# unit tests + coverage, with the same flags as the "test" job
+$ docker run --rm -v "$PWD":/src -w /src -e PIP_ROOT_USER_ACTION=ignore -e PIP_DISABLE_PIP_VERSION_CHECK=1 python:3.12-slim sh -c 'pip install -q -r requirements-dev.txt && pytest -v -p no:cacheprovider --junitxml=reports/junit-3.12.xml --cov --cov-report=term-missing --cov-report=xml:reports/coverage.xml --cov-fail-under=90'
+============================= test session starts ==============================
+platform linux -- Python 3.12.15, pytest-9.1.1, pluggy-1.6.0 -- /usr/local/bin/python3.12
+rootdir: /src
+configfile: pyproject.toml
+testpaths: tests
+plugins: cov-7.1.0
+collecting ... collected 17 items
+
+tests/test_api.py::test_index PASSED                                     [  5%]
+tests/test_api.py::test_health PASSED                                    [ 11%]
+tests/test_api.py::test_add_endpoint PASSED                              [ 17%]
+tests/test_api.py::test_divide_by_zero_is_400 PASSED                     [ 23%]
+tests/test_api.py::test_missing_param_is_400 PASSED                      [ 29%]
+tests/test_api.py::test_non_numeric_is_400 PASSED                        [ 35%]
+tests/test_api.py::test_unknown_operation_is_400 PASSED                  [ 41%]
+tests/test_calculator.py::test_add PASSED                                [ 47%]
+tests/test_calculator.py::test_subtract PASSED                           [ 52%]
+tests/test_calculator.py::test_multiply PASSED                           [ 58%]
+tests/test_calculator.py::test_divide PASSED                             [ 64%]
+tests/test_calculator.py::test_divide_by_zero PASSED                     [ 70%]
+tests/test_calculator.py::test_calculate_dispatch[add-7] PASSED          [ 76%]
+tests/test_calculator.py::test_calculate_dispatch[subtract-3] PASSED     [ 82%]
+tests/test_calculator.py::test_calculate_dispatch[multiply-10] PASSED    [ 88%]
+tests/test_calculator.py::test_calculate_dispatch[divide-2.5] PASSED     [ 94%]
+tests/test_calculator.py::test_calculate_unknown_op PASSED               [100%]
+
+--------------- generated xml file: /src/reports/junit-3.12.xml ----------------
+================================ tests coverage ================================
+_______________ coverage: platform linux, python 3.12.15-final-0 _______________
+
+Name                Stmts   Miss  Cover   Missing
+-------------------------------------------------
+app/__init__.py         0      0   100%
+app/calculator.py      16      0   100%
+app/main.py            29      0   100%
+-------------------------------------------------
+TOTAL                  45      0   100%
+Coverage XML written to file reports/coverage.xml
+Required test coverage of 90% reached. Total coverage: 100.00%
+============================== 17 passed in 1.26s ==============================
+
+$ ls reports/ && head -3 reports/junit-3.12.xml | cut -c1-220
+coverage.xml
+junit-3.12.xml
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="17" time="1.260" timestamp="2026-10-07T16:22:09.634732+00:00" hostname="07522ac253
+
+# the failure scenario from the course: break add() and the pipeline must stop at the test stage
+$ sed -i.bak 's/return a + b$/return a + b + 1/' app/calculator.py && grep -n 'return a + b' app/calculator.py
+7:    return a + b + 1
+
+$ docker run --rm -v "$PWD":/src -w /src -e PIP_ROOT_USER_ACTION=ignore -e PIP_DISABLE_PIP_VERSION_CHECK=1 python:3.12-slim sh -c 'pip install -q -r requirements-dev.txt && pytest -q -p no:cacheprovider --no-header -rf; echo "pytest exit code: $?"'
+..F....F....F....                                                        [100%]
+=================================== FAILURES ===================================
+______________________________ test_add_endpoint _______________________________
+
+client = <FlaskClient <Flask 'app.main'>>
+
+    def test_add_endpoint(client):
+        body = client.get("/api/add?a=2&b=3").get_json()
+>       assert body["result"] == 5
+E       assert 6.0 == 5
+
+tests/test_api.py:25: AssertionError
+___________________________________ test_add ___________________________________
+
+    def test_add():
+>       assert add(10, 5) == 15
+E       assert 16 == 15
+E        +  where 16 = add(10, 5)
+
+tests/test_calculator.py:7: AssertionError
+________________________ test_calculate_dispatch[add-7] ________________________
+
+op = 'add', expected = 7
+
+    @pytest.mark.parametrize("op,expected", [("add", 7), ("subtract", 3), ("multiply", 10), ("divide", 2.5)])
+    def test_calculate_dispatch(op, expected):
+>       assert calculate(op, 5, 2) == expected
+E       AssertionError: assert 8 == 7
+E        +  where 8 = calculate('add', 5, 2)
+
+tests/test_calculator.py:29: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_api.py::test_add_endpoint - assert 6.0 == 5
+FAILED tests/test_calculator.py::test_add - assert 16 == 15
+FAILED tests/test_calculator.py::test_calculate_dispatch[add-7] - AssertionEr...
+3 failed, 14 passed in 0.33s
+pytest exit code: 1
+
+$ mv app/calculator.py.bak app/calculator.py && grep -n "return a + b" app/calculator.py
+7:    return a + b
+

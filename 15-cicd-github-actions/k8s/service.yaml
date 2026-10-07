@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: hw15-calculator
+spec:
+  selector:
+    app: hw15-calculator
+  ports:
+    - port: 80
+      targetPort: 8000

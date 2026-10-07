@@ -1,0 +1,238 @@
+# Homework 15 (Session 16) — CI/CD with GitHub Actions.
+# CI on every push / PR touching the homework; CD (push to GHCR + deploy to a kind
+# cluster on the runner) only for pushes to main.
+name: HW15 CI/CD
+
+on:
+  push:
+    paths:
+      - "15-cicd-github-actions/**"
+      - ".github/workflows/hw15-cicd.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "15-cicd-github-actions/**"
+      - ".github/workflows/hw15-cicd.yml"
+  workflow_dispatch:
+
+# One run per branch at a time; a newer push cancels the older run.
+concurrency:
+  group: hw15-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/binarybhakti/hw15-calculator
+
+defaults:
+  run:
+    working-directory: 15-cicd-github-actions
+
+jobs:
+  # ---------------------------------------------------------------- CI
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: 15-cicd-github-actions/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check --output-format=github .
+      - run: ruff format --check .
+
+  test:
+    name: Unit tests (Python ${{ matrix.python-version }})
+    needs: lint
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: 15-cicd-github-actions/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Run pytest with coverage
+        run: |
+          mkdir -p reports
+          pytest -v --junitxml=reports/junit-${{ matrix.python-version }}.xml \
+                 --cov --cov-report=term-missing --cov-report=xml:reports/coverage.xml \
+                 --cov-report=html:reports/htmlcov --cov-fail-under=90
+      - name: Write results to the job summary
+        if: always()
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import xml.etree.ElementTree as ET
+          s = ET.parse("reports/junit-${{ matrix.python-version }}.xml").getroot()
+          s = s if s.tag == "testsuite" else s[0]
+          print(f"### Tests on Python ${{ matrix.python-version }}")
+          print(f"| tests | failures | errors | skipped | time |\n|---|---|---|---|---|")
+          print(f"| {s.get('tests')} | {s.get('failures')} | {s.get('errors')} | {s.get('skipped')} | {float(s.get('time')):.2f}s |")
+          PY
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-py${{ matrix.python-version }}
+          path: 15-cicd-github-actions/reports/junit-*.xml
+      - name: Upload coverage report
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: |
+            15-cicd-github-actions/reports/coverage.xml
+            15-cicd-github-actions/reports/htmlcov/
+          retention-days: 14
+
+  secrets-demo:
+    name: Secrets demo
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .   # no checkout in this job, so the homework folder does not exist
+    env:
+      # A repository secret. Never echoed; GitHub masks it in logs as *** anyway.
+      DEMO_API_KEY: ${{ secrets.DEMO_API_KEY }}
+    steps:
+      - name: Use a repository secret without revealing it
+        run: |
+          if [ -n "$DEMO_API_KEY" ]; then
+            echo "DEMO_API_KEY is set (${#DEMO_API_KEY} characters)."
+            echo "Printed directly it shows as: $DEMO_API_KEY"
+          else
+            echo "DEMO_API_KEY is not configured — a real deploy step would stop here."
+          fi
+      - name: The automatic GITHUB_TOKEN
+        run: |
+          echo "GITHUB_TOKEN is provided automatically for every run: ${{ secrets.GITHUB_TOKEN != '' }}"
+          echo "Its permissions come from the workflow/job 'permissions:' block."
+
+  build:
+    name: Docker build
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      tags: ${{ steps.meta.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Build (no push) and export as an artifact
+        uses: docker/build-push-action@v7
+        with:
+          context: 15-cicd-github-actions
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=1.0.${{ github.run_number }}
+            GIT_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=hw15
+          cache-to: type=gha,mode=max,scope=hw15
+          outputs: type=docker,dest=${{ runner.temp }}/hw15-image.tar
+      - name: Smoke-test the built image
+        run: |
+          docker load -i "${{ runner.temp }}/hw15-image.tar"
+          TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -1)
+          docker run -d --name smoke -p 8000:8000 "$TAG"
+          for _ in $(seq 1 20); do curl -fs localhost:8000/health && break; sleep 1; done
+          curl -fs "localhost:8000/api/multiply?a=6&b=7"
+          docker image ls "${{ env.IMAGE }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hw15-image
+          path: ${{ runner.temp }}/hw15-image.tar
+          retention-days: 3
+
+  # ---------------------------------------------------------------- CD
+  push:
+    name: Push image to GHCR
+    needs: [build, secrets-demo]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: hw15-image
+          path: ${{ runner.temp }}
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push the exact image that was tested
+        id: push
+        working-directory: .
+        run: |
+          docker load -i "${{ runner.temp }}/hw15-image.tar"
+          for t in ${{ needs.build.outputs.tags }}; do docker push "$t"; done
+          DIGEST=$(docker inspect --format '{{index .RepoDigests 0}}' "$(echo '${{ needs.build.outputs.tags }}' | head -1)" | cut -d@ -f2)
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "### Pushed \`${{ env.IMAGE }}@$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy to Kubernetes (kind)
+    needs: push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read   # the cluster pulls the (possibly private) GHCR image with this job's token
+    environment:
+      name: kind-on-runner
+    steps:
+      - uses: actions/checkout@v7
+      - name: Create a kind cluster on the runner
+        uses: helm/kind-action@v1.15.1
+        with:
+          cluster_name: hw15
+      - name: Let the cluster pull from GHCR with this run's token
+        run: |
+          kubectl create secret docker-registry ghcr \
+            --docker-server=ghcr.io --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.GITHUB_TOKEN }}
+          kubectl patch serviceaccount default -p '{"imagePullSecrets":[{"name":"ghcr"}]}'
+      - name: Apply manifests pinned to the pushed digest
+        run: |
+          sed "s|IMAGE_PLACEHOLDER|${IMAGE}@${{ needs.push.outputs.digest }}|" k8s/deployment.yaml | kubectl apply -f -
+          kubectl apply -f k8s/service.yaml
+          kubectl rollout status deployment/hw15-calculator --timeout=180s
+      - name: Smoke test through the Service
+        run: |
+          kubectl get nodes,deploy,pods,svc -o wide
+          kubectl port-forward svc/hw15-calculator 8080:80 >/dev/null 2>&1 &
+          for _ in $(seq 1 20); do curl -fs localhost:8080/health && break; sleep 1; done
+          echo; curl -fs localhost:8080/ | tee root.json; echo
+          curl -fs "localhost:8080/api/divide?a=22&b=7"; echo
+          grep -q '${{ github.sha }}' root.json && echo "deployed pod reports this commit: ${{ github.sha }}"
+      - name: Deployment evidence in the job summary
+        if: always()
+        run: |
+          {
+            echo "### Deployed to kind"
+            echo '```'
+            kubectl get deploy,pods,svc -o wide
+            echo
+            kubectl get deploy hw15-calculator -o jsonpath='{.spec.template.spec.containers[0].image}'; echo
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

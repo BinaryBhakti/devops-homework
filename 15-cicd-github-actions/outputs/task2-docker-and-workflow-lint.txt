@@ -1,0 +1,76 @@
+########## HOMEWORK 15 — Docker build, run, verify; then lint the workflow itself ##########
+
+$ docker build -q --build-arg APP_VERSION=1.0.local --build-arg GIT_SHA=$(cd .. && git rev-parse --short HEAD) -t hw15-calculator:local .
+sha256:e10c0f2b8a3dbf892c67681556383adc6687fddd98734a87fd2cba9ddbb199b3
+
+$ docker image ls hw15-calculator:local --format 'table {{.Repository}}\t{{.Tag}}\t{{.Size}}'
+REPOSITORY        TAG       SIZE
+hw15-calculator   local     231MB
+
+$ docker run -d --name hw15 -p 18000:8000 hw15-calculator:local
+5c4937d4fbb92d1677a72b6c5b8ce872f6b76609496c05eb7118ec2792fa8662
+
+$ for i in $(seq 1 30); do s=$(docker inspect -f "{{.State.Health.Status}}" hw15); [ "$s" = healthy ] && break; sleep 1; done; echo "health: $s"
+health: healthy
+
+$ curl -s localhost:18000/; echo
+{"app":"hw15-calculator","git_sha":"4f5bb23","message":"Hello from the Session 16 CI/CD pipeline","operations":["add","subtract","multiply","divide"],"version":"1.0.local"}
+
+
+$ curl -s 'localhost:18000/api/divide?a=22&b=7'; echo
+{"a":22.0,"b":7.0,"operation":"divide","result":3.142857142857143}
+
+
+$ curl -s -w ' [HTTP %{http_code}]\n' 'localhost:18000/api/divide?a=1&b=0'
+{"error":"Cannot divide by zero"}
+ [HTTP 400]
+
+$ docker exec hw15 sh -c 'id; ps -o user,pid,cmd 2>/dev/null || cat /proc/1/cmdline | tr "\\0" " "; echo'
+uid=10001(app) gid=10001(app) groups=10001(app)
+/opt/venv/bin/python /opt/venv/bin/gunicorn --bind 0.0.0.0:8000 --workers 2 --access-logfile - app.main:app 
+
+$ docker logs hw15 2>&1 | tail -4
+127.0.0.1 - - [07/Oct/2026:16:26:51 +0000] "GET /health HTTP/1.1" 200 16 "-" "Python-urllib/3.12"
+192.168.65.1 - - [07/Oct/2026:16:26:52 +0000] "GET / HTTP/1.1" 200 173 "-" "curl/8.7.1"
+192.168.65.1 - - [07/Oct/2026:16:26:52 +0000] "GET /api/divide?a=22&b=7 HTTP/1.1" 200 67 "-" "curl/8.7.1"
+192.168.65.1 - - [07/Oct/2026:16:26:52 +0000] "GET /api/divide?a=1&b=0 HTTP/1.1" 400 34 "-" "curl/8.7.1"
+
+$ docker rm -f hw15
+hw15
+
+# validate the workflow with actionlint (the de-facto GitHub Actions linter, which also runs shellcheck on every run: block)
+$ cd .. && docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:latest -color=false .github/workflows/hw15-cicd.yml && echo "actionlint: no problems found"
+Unable to find image 'rhysd/actionlint:latest' locally
+latest: Pulling from rhysd/actionlint
+d36b61b7f131: Pulling fs layer
+326a15d5e1c2: Pulling fs layer
+d8ad8cd72600: Pulling fs layer
+bf23c343872e: Pulling fs layer
+326a15d5e1c2: Download complete
+d36b61b7f131: Download complete
+be30d9ebc5c9: Download complete
+d8ad8cd72600: Download complete
+d8ad8cd72600: Pull complete
+326a15d5e1c2: Pull complete
+bf23c343872e: Download complete
+bf23c343872e: Pull complete
+d36b61b7f131: Pull complete
+Digest: sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+Status: Downloaded newer image for rhysd/actionlint:latest
+.github/workflows/hw15-cicd.yml:150:9: shellcheck reported issue in this script: SC2034:warning:4:1: i appears unused. Verify use (or export if used externally) [shellcheck]
+    |
+150 |         run: |
+    |         ^~~~
+.github/workflows/hw15-cicd.yml:218:9: shellcheck reported issue in this script: SC2034:warning:3:1: i appears unused. Verify use (or export if used externally) [shellcheck]
+    |
+218 |         run: |
+    |         ^~~~
+
+# fix: the wait loops never read $i — use _ as the loop variable (shellcheck SC2034), then lint again
+$ cd .. && git diff --no-color -U0 .github/workflows/hw15-cicd.yml 2>/dev/null | grep '^[-+] ' || grep -n 'for _ in' .github/workflows/hw15-cicd.yml
+154:          for _ in $(seq 1 20); do curl -fs localhost:8000/health && break; sleep 1; done
+221:          for _ in $(seq 1 20); do curl -fs localhost:8080/health && break; sleep 1; done
+
+$ cd .. && docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:latest -color=false .github/workflows/hw15-cicd.yml && echo "actionlint: no problems found"
+actionlint: no problems found
+

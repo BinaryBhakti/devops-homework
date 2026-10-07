@@ -1,0 +1,33 @@
+# IMAGE_PLACEHOLDER is replaced by the CD job with the exact image it just pushed
+# (ghcr.io/binarybhakti/hw15-calculator@sha256:...).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hw15-calculator
+  labels:
+    app: hw15-calculator
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hw15-calculator
+  template:
+    metadata:
+      labels:
+        app: hw15-calculator
+    spec:
+      containers:
+        - name: api
+          image: IMAGE_PLACEHOLDER
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 192Mi }

@@ -1,0 +1,26 @@
+########## HOMEWORK 15 — final lint of the workflow as committed ##########
+
+$ docker run --rm --cpus=1 -v "$PWD":/repo -w /repo rhysd/actionlint:latest -color=false .github/workflows/hw15-cicd.yml && echo "actionlint: no problems found"
+actionlint: no problems found
+
+$ grep -nE "^  [a-z-]+:$|^    needs:|^    if:|permissions:|packages:" .github/workflows/hw15-cicd.yml
+7:  push:
+23:permissions:
+30:  run:
+35:  lint:
+49:  test:
+51:    needs: lint
+98:  secrets-demo:
+119:          echo "Its permissions come from the workflow/job 'permissions:' block."
+121:  build:
+123:    needs: test
+164:  push:
+166:    needs: [build, secrets-demo]
+167:    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+169:    permissions:
+171:      packages: write
+194:  deploy:
+196:    needs: push
+198:    permissions:
+200:      packages: read   # the cluster pulls the (possibly private) GHCR image with this job's token
+
