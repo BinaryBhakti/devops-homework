@@ -1,0 +1,110 @@
+########## TASK 2b — a failed upgrade that still changed what the HEALTHY pods serve ##########
+
+$ kubectl run probe --image=curlimages/curl:8.11.1 --restart=Never -- sleep 3600 && kubectl wait pod/probe --for=condition=Ready --timeout=120s
+pod/probe created
+pod/probe condition met
+
+# PART A — the chart as built for Task 2 (ConfigMap mounted as a directory)
+$ helm install shop ./rollback-demo --set image.tag=1.27-alpine --set replicaCount=3 --set message='v1 - good' --wait --timeout 3m | grep -E '^(STATUS|REVISION)'
+STATUS: deployed
+REVISION: 1
+
+# start a broken upgrade (image does not exist) in the background, and sample what the CURRENT healthy pods serve every 10 s
+$ # sampling: 3 requests through the Service every 10 s (time | revision | message)
+03:11:09   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:11:21   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:11:37   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:11:47   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:11:59   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:12:09   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:12:20   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 2 | v2 - BROKEN  ;
+03:12:31   revision 2 | v2 - BROKEN  ; revision 2 | v2 - BROKEN  ; revision 1 | v1 - good  ;
+
+$ kubectl get pods -l app.kubernetes.io/instance=shop -o custom-columns=POD:.metadata.name,STATUS:.status.phase,READY:.status.containerStatuses[0].ready,IMAGE:.spec.containers[0].image
+POD                     STATUS    READY   IMAGE
+shop-688bf96bb7-bzkf6   Pending   false   nginx:1.99-does-not-exist
+shop-795d64d6ff-g9vq9   Running   true    nginx:1.27-alpine
+shop-795d64d6ff-qp5z6   Running   true    nginx:1.27-alpine
+shop-795d64d6ff-x9k94   Running   true    nginx:1.27-alpine
+
+$ helm history shop | cut -c1-110
+REVISION	UPDATED                 	STATUS  	CHART              	APP VERSION	DESCRIPTION                        
+1       	Thu Oct  8 03:11:05 2026	deployed	rollback-demo-0.1.0	1.26       	Install complete                   
+2       	Thu Oct  8 03:11:10 2026	failed  	rollback-demo-0.1.0	1.26       	Upgrade "shop" failed: resource Dep
+
+# roll back to revision 1 and keep sampling
+$ helm rollback shop 1 --wait --timeout 3m
+Rollback was a success! Happy Helming!
+
+$ # sampling after the rollback
+03:12:47   revision 2 | v2 - BROKEN  ; revision 2 | v2 - BROKEN  ; revision 2 | v2 - BROKEN  ;
+03:13:00   revision 2 | v2 - BROKEN  ; revision 2 | v2 - BROKEN  ; revision 2 | v2 - BROKEN  ;
+03:13:11   revision 2 | v2 - BROKEN  ; revision 2 | v2 - BROKEN  ; revision 2 | v2 - BROKEN  ;
+03:13:23   revision 2 | v2 - BROKEN  ; revision 2 | v2 - BROKEN  ; revision 2 | v2 - BROKEN  ;
+03:13:35   revision 2 | v2 - BROKEN  ; revision 2 | v2 - BROKEN  ; revision 2 | v2 - BROKEN  ;
+03:13:46   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:13:57   revision 1 | v1 - good  ; revision 2 | v2 - BROKEN  ; revision 1 | v1 - good  ;
+03:14:09   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+
+$ helm uninstall shop --wait >/dev/null && echo uninstalled
+uninstalled
+
+# PART B — the fix: the same chart with the page mounted via subPath (not live-updated)
+$ diff rollback-demo/templates/deployment.yaml rollback-demo-fixed/templates/deployment.yaml
+32a33,35
+>             # subPath: the file is copied in when the container starts and is NOT live-updated.
+>             # A whole-directory ConfigMap mount IS live-updated by the kubelet, which let a failed
+>             # upgrade's new ConfigMap leak into the old, healthy pods (see the README).
+34c37,38
+<               mountPath: /usr/share/nginx/html
+---
+>               mountPath: /usr/share/nginx/html/index.html
+>               subPath: index.html
+
+$ helm install shop ./rollback-demo-fixed --set image.tag=1.27-alpine --set replicaCount=3 --set message='v1 - good' --wait --timeout 3m | grep -E '^(STATUS|REVISION)'
+STATUS: deployed
+REVISION: 1
+
+# start a broken upgrade (image does not exist) in the background, and sample what the CURRENT healthy pods serve every 10 s
+$ # sampling: 3 requests through the Service every 10 s (time | revision | message)
+03:14:30   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:14:44   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:14:55   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:15:06   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:15:17   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:15:32   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:15:44   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:15:55   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+
+$ kubectl get pods -l app.kubernetes.io/instance=shop -o custom-columns=POD:.metadata.name,STATUS:.status.phase,READY:.status.containerStatuses[0].ready,IMAGE:.spec.containers[0].image
+POD                     STATUS    READY   IMAGE
+shop-67b55dbb98-dz4xn   Running   true    nginx:1.27-alpine
+shop-67b55dbb98-q8wk9   Running   true    nginx:1.27-alpine
+shop-67b55dbb98-zk6sg   Running   true    nginx:1.27-alpine
+shop-7f598c6967-dmgtb   Pending   false   nginx:1.99-does-not-exist
+
+$ helm history shop | cut -c1-110
+REVISION	UPDATED                 	STATUS  	CHART              	APP VERSION	DESCRIPTION                        
+1       	Thu Oct  8 03:14:22 2026	deployed	rollback-demo-0.2.0	1.26       	Install complete                   
+2       	Thu Oct  8 03:14:30 2026	failed  	rollback-demo-0.2.0	1.26       	Upgrade "shop" failed: resource Dep
+
+# roll back to revision 1 and keep sampling
+$ helm rollback shop 1 --wait --timeout 3m
+Rollback was a success! Happy Helming!
+
+$ # sampling after the rollback
+03:16:07   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:16:18   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:16:29   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:16:40   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:16:50   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:17:02   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:17:13   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+03:17:24   revision 1 | v1 - good  ; revision 1 | v1 - good  ; revision 1 | v1 - good  ;
+
+$ helm uninstall shop --wait >/dev/null && echo uninstalled
+uninstalled
+
+$ kubectl delete pod probe
+pod "probe" deleted from default namespace
+

@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "rollback-demo.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "rollback-demo.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "rollback-demo.selector" . | nindent 8 }}
+      annotations:
+        # Pods only restart when their template changes. Hashing the ConfigMap into the
+        # template makes a message change roll the pods too.
+        checksum/page: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      containers:
+        - name: web
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            # subPath: the file is copied in when the container starts and is NOT live-updated.
+            # A whole-directory ConfigMap mount IS live-updated by the kubelet, which let a failed
+            # upgrade's new ConfigMap leak into the old, healthy pods (see the README).
+            - name: page
+              mountPath: /usr/share/nginx/html/index.html
+              subPath: index.html
+      volumes:
+        - name: page
+          configMap:
+            name: {{ .Release.Name }}-page

@@ -1,0 +1,265 @@
+########## TASK 1 — Helm commands ##########
+
+$ helm version
+version.BuildInfo{Version:"v4.3.0", GitCommit:"bec5b06ed841fe5269972d864d5177944fd5970f", GitTreeState:"clean", GoVersion:"go1.27.1", KubeClientVersion:"v1.37"}
+
+# helm repo — chart repositories are just HTTP indexes of packaged charts
+$ helm repo add bitnami https://charts.bitnami.com/bitnami
+"bitnami" has been added to your repositories
+
+$ helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+"ingress-nginx" has been added to your repositories
+
+$ helm repo list
+NAME                	URL                                               
+prometheus-community	https://prometheus-community.github.io/helm-charts
+grafana             	https://grafana.github.io/helm-charts             
+grafana-community   	https://grafana-community.github.io/helm-charts   
+bitnami             	https://charts.bitnami.com/bitnami                
+ingress-nginx       	https://kubernetes.github.io/ingress-nginx        
+
+$ helm repo update
+Hang tight while we grab the latest from your chart repositories...
+...Successfully got an update from the "ingress-nginx" chart repository
+...Successfully got an update from the "bitnami" chart repository
+...Successfully got an update from the "grafana-community" chart repository
+...Successfully got an update from the "grafana" chart repository
+...Successfully got an update from the "prometheus-community" chart repository
+Update Complete. ⎈Happy Helming!⎈
+
+# helm search — repo searches the repos added above (local index); hub searches Artifact Hub
+$ helm search repo nginx | head -6
+NAME                                          	CHART VERSION	APP VERSION	DESCRIPTION                                       
+bitnami/nginx                                 	25.2.1       	1.31.6     	NGINX Open Source is a web server that can be a...
+bitnami/nginx-ingress-controller              	12.0.7       	1.13.1     	NGINX Ingress Controller is an Ingress controll...
+bitnami/nginx-intel                           	2.1.15       	0.4.9      	DEPRECATED NGINX Open Source for Intel is a lig...
+ingress-nginx/ingress-nginx                   	4.15.1       	1.15.1     	Ingress controller for Kubernetes using NGINX a...
+prometheus-community/prometheus-nginx-exporter	1.23.1       	1.5.3      	A Helm chart for NGINX Prometheus Exporter        
+
+$ helm search repo ingress-nginx/ingress-nginx --versions | head -4
+NAME                       	CHART VERSION	APP VERSION	DESCRIPTION                                       
+ingress-nginx/ingress-nginx	4.15.1       	1.15.1     	Ingress controller for Kubernetes using NGINX a...
+ingress-nginx/ingress-nginx	4.15.0       	1.15.0     	Ingress controller for Kubernetes using NGINX a...
+ingress-nginx/ingress-nginx	4.14.5       	1.14.5     	Ingress controller for Kubernetes using NGINX a...
+
+$ helm search hub prometheus --max-col-width 60 | head -6
+URL                                                         	CHART VERSION     	APP VERSION            	DESCRIPTION                                                 
+https://artifacthub.io/packages/helm/prometheus-community...	29.36.0           	v3.15.0                	Prometheus is a monitoring system and time series database. 
+https://artifacthub.io/packages/helm/prometheus-worawutch...	13.0.0            	2.22.1                 	Prometheus is a monitoring system and time series database. 
+https://artifacthub.io/packages/helm/saurabh6-prometheus/...	0.2.0             	1.1                    	This is a Helm Chart for Prometheus Setup.                  
+https://artifacthub.io/packages/helm/quench-prometheus/pr...	0.0.20            	3.15.0                 	Metrics collection, storage, and alerting system that scr...
+https://artifacthub.io/packages/helm/romanow-helm-charts/...	1.7.2             	2.52.0                 	Prometheus collects and stores its metrics as time series...
+
+$ helm show chart bitnami/nginx | grep -E "^(name|version|appVersion|description):"
+appVersion: 1.31.6
+description: NGINX Open Source is a web server that can be also used as a reverse
+name: nginx
+version: 25.2.1
+
+# helm create — scaffold a chart
+$ rm -rf demo-app && helm create demo-app
+Creating demo-app
+
+$ find demo-app -type f | sort
+demo-app/.helmignore
+demo-app/Chart.yaml
+demo-app/templates/NOTES.txt
+demo-app/templates/_helpers.tpl
+demo-app/templates/deployment.yaml
+demo-app/templates/hpa.yaml
+demo-app/templates/httproute.yaml
+demo-app/templates/ingress.yaml
+demo-app/templates/service.yaml
+demo-app/templates/serviceaccount.yaml
+demo-app/templates/tests/test-connection.yaml
+demo-app/values.yaml
+
+$ helm lint demo-app
+==> Linting demo-app
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+
+$ helm template demo-app ./demo-app | grep -E "^(kind|  name):" 
+kind: ServiceAccount
+  name: demo-app
+kind: Service
+  name: demo-app
+kind: Deployment
+  name: demo-app
+kind: Pod
+  name: "demo-app-test-connection"
+
+# helm install
+$ helm install demo ./demo-app --set image.tag=1.27-alpine --set replicaCount=2 --wait --timeout 3m
+NAME: demo
+LAST DEPLOYED: Thu Oct  8 03:05:24 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+NOTES:
+1. Get the application URL by running these commands:
+  export POD_NAME=$(kubectl get pods --namespace default -l "app.kubernetes.io/name=demo-app,app.kubernetes.io/instance=demo" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace default $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  echo "Visit http://127.0.0.1:8080 to use your application"
+  kubectl --namespace default port-forward $POD_NAME 8080:$CONTAINER_PORT
+
+# helm list
+$ helm list
+NAME	NAMESPACE	REVISION	UPDATED                             	STATUS  	CHART         	APP VERSION
+demo	default  	1       	2026-10-08 03:05:24.594334 +0530 IST	deployed	demo-app-0.1.0	1.16.0     
+
+$ helm list -A
+NAME	NAMESPACE	REVISION	UPDATED                             	STATUS  	CHART         	APP VERSION
+demo	default  	1       	2026-10-08 03:05:24.594334 +0530 IST	deployed	demo-app-0.1.0	1.16.0     
+
+# helm status
+$ helm status demo
+NAME: demo
+LAST DEPLOYED: Thu Oct  8 03:05:24 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+RESOURCES:
+==> v1/ServiceAccount
+NAME            AGE
+demo-demo-app   3s
+
+==> v1/Service
+NAME            TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
+demo-demo-app   ClusterIP   10.100.43.18   <none>        80/TCP    3s
+
+==> v1/Deployment
+NAME            READY   UP-TO-DATE   AVAILABLE   AGE
+demo-demo-app   2/2     2            2           3s
+
+==> v1/Pod(related)
+NAME                             READY   STATUS    RESTARTS   AGE
+demo-demo-app-6fbbf67d79-2m7lz   1/1     Running   0          3s
+demo-demo-app-6fbbf67d79-8znxr   1/1     Running   0          3s
+
+
+NOTES:
+1. Get the application URL by running these commands:
+  export POD_NAME=$(kubectl get pods --namespace default -l "app.kubernetes.io/name=demo-app,app.kubernetes.io/instance=demo" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace default $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  echo "Visit http://127.0.0.1:8080 to use your application"
+  kubectl --namespace default port-forward $POD_NAME 8080:$CONTAINER_PORT
+
+# helm get — what Helm stored for this release (from its Secret in the release namespace)
+$ helm get values demo
+USER-SUPPLIED VALUES:
+image:
+  tag: 1.27-alpine
+replicaCount: 2
+
+$ helm get values demo --all | head -12
+COMPUTED VALUES:
+affinity: {}
+autoscaling:
+  enabled: false
+  maxReplicas: 100
+  minReplicas: 1
+  targetCPUUtilizationPercentage: 80
+fullnameOverride: ""
+httpRoute:
+  annotations: {}
+  enabled: false
+  hostnames:
+
+$ helm get manifest demo | grep -E "^(kind|  name):|image:"
+kind: ServiceAccount
+  name: demo-demo-app
+kind: Service
+  name: demo-demo-app
+kind: Deployment
+  name: demo-demo-app
+          image: "nginx:1.27-alpine"
+
+$ helm get notes demo | head -5
+NOTES:
+1. Get the application URL by running these commands:
+  export POD_NAME=$(kubectl get pods --namespace default -l "app.kubernetes.io/name=demo-app,app.kubernetes.io/instance=demo" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace default $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  echo "Visit http://127.0.0.1:8080 to use your application"
+
+$ helm get metadata demo
+NAME: demo
+CHART: demo-app
+VERSION: 0.1.0
+APP_VERSION: 1.16.0
+ANNOTATIONS: 
+LABELS: modifiedAt=1791408927,name=demo,owner=helm,status=deployed,version=1
+DEPENDENCIES: 
+NAMESPACE: default
+REVISION: 1
+STATUS: deployed
+DEPLOYED_AT: 2026-10-08T03:05:24+05:30
+APPLY_METHOD: server-side apply
+
+$ kubectl get secrets -l owner=helm
+NAME                         TYPE                 DATA   AGE
+sh.helm.release.v1.demo.v1   helm.sh/release.v1   1      5s
+
+# helm upgrade
+$ helm upgrade demo ./demo-app --reuse-values --set replicaCount=3 --wait --timeout 3m
+Release "demo" has been upgraded. Happy Helming!
+NAME: demo
+LAST DEPLOYED: Thu Oct  8 03:05:29 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 2
+DESCRIPTION: Upgrade complete
+NOTES:
+1. Get the application URL by running these commands:
+  export POD_NAME=$(kubectl get pods --namespace default -l "app.kubernetes.io/name=demo-app,app.kubernetes.io/instance=demo" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace default $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  echo "Visit http://127.0.0.1:8080 to use your application"
+  kubectl --namespace default port-forward $POD_NAME 8080:$CONTAINER_PORT
+
+$ kubectl get deploy demo-demo-app
+NAME            READY   UP-TO-DATE   AVAILABLE   AGE
+demo-demo-app   3/3     3            3           15s
+
+# helm history
+$ helm history demo
+REVISION	UPDATED                 	STATUS    	CHART         	APP VERSION	DESCRIPTION     
+1       	Thu Oct  8 03:05:24 2026	superseded	demo-app-0.1.0	1.16.0     	Install complete
+2       	Thu Oct  8 03:05:29 2026	deployed  	demo-app-0.1.0	1.16.0     	Upgrade complete
+
+# helm rollback
+$ helm rollback demo 1 --wait --timeout 3m
+Rollback was a success! Happy Helming!
+
+$ helm history demo
+REVISION	UPDATED                 	STATUS    	CHART         	APP VERSION	DESCRIPTION     
+1       	Thu Oct  8 03:05:24 2026	superseded	demo-app-0.1.0	1.16.0     	Install complete
+2       	Thu Oct  8 03:05:29 2026	superseded	demo-app-0.1.0	1.16.0     	Upgrade complete
+3       	Thu Oct  8 03:05:41 2026	deployed  	demo-app-0.1.0	1.16.0     	Rollback to 1   
+
+$ kubectl get deploy demo-demo-app
+NAME            READY   UP-TO-DATE   AVAILABLE   AGE
+demo-demo-app   2/2     2            2           21s
+
+# helm uninstall
+$ helm uninstall demo --wait
+release "demo" uninstalled
+
+$ helm list -A; kubectl get all -l app.kubernetes.io/instance=demo
+NAME	NAMESPACE	REVISION	UPDATED	STATUS	CHART	APP VERSION
+NAME                                 READY   STATUS        RESTARTS   AGE
+pod/demo-demo-app-6fbbf67d79-2m7lz   1/1     Terminating   0          23s
+pod/demo-demo-app-6fbbf67d79-8znxr   1/1     Terminating   0          23s
+
+$ helm repo remove bitnami
+"bitnami" has been removed from your repositories
+
+$ helm repo list
+NAME                	URL                                               
+prometheus-community	https://prometheus-community.github.io/helm-charts
+grafana             	https://grafana.github.io/helm-charts             
+grafana-community   	https://grafana-community.github.io/helm-charts   
+ingress-nginx       	https://kubernetes.github.io/ingress-nginx        
+

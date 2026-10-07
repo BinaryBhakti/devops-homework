@@ -1,0 +1,147 @@
+########## TASK 3 — Mini project: package and deploy the Notes app with Helm ##########
+
+$ find notes-chart -type f | sort
+notes-chart/Chart.yaml
+notes-chart/templates/configmap.yaml
+notes-chart/templates/deployment.yaml
+notes-chart/templates/service.yaml
+notes-chart/values-prod.yaml
+notes-chart/values.yaml
+
+$ helm lint notes-chart
+==> Linting notes-chart
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+
+$ helm template notes notes-chart | grep -E "^(kind|  name):|image:|replicas:|ENVIRONMENT"
+kind: ConfigMap
+  name: notes-config
+  ENVIRONMENT: "development"
+kind: Service
+  name: notes-svc
+kind: Deployment
+  name: notes-deploy
+  replicas: 1
+          image: "nginx:1.24"
+
+$ helm template notes notes-chart -f notes-chart/values-prod.yaml | grep -E "image:|replicas:|ENVIRONMENT"
+  ENVIRONMENT: "production"
+  replicas: 3
+          image: "nginx:1.25"
+
+# install — development values
+$ helm install notes notes-chart --wait --timeout 3m
+NAME: notes
+LAST DEPLOYED: Thu Oct  8 03:18:21 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+
+$ kubectl get deploy,svc,configmap -l app=notes 2>/dev/null; kubectl get deploy notes-deploy; kubectl get svc notes-svc; kubectl get configmap notes-config -o jsonpath="{.data}"; echo
+NAME                           READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/notes-deploy   1/1     1            1           22s
+NAME           READY   UP-TO-DATE   AVAILABLE   AGE
+notes-deploy   1/1     1            1           22s
+NAME        TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+notes-svc   NodePort   10.111.210.79   <none>        80:30090/TCP   22s
+{"APP_NAME":"notes-app","ENVIRONMENT":"development"}
+
+$ kubectl exec deploy/notes-deploy -- printenv ENVIRONMENT; kubectl get deploy notes-deploy -o jsonpath='{.spec.template.spec.containers[0].image} x {.spec.replicas}{"\n"}'
+development
+nginx:1.24 x 1
+
+# upgrade — production values file
+$ helm upgrade notes notes-chart -f notes-chart/values-prod.yaml --wait --timeout 3m
+Release "notes" has been upgraded. Happy Helming!
+NAME: notes
+LAST DEPLOYED: Thu Oct  8 03:18:44 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 2
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+
+$ kubectl get deploy notes-deploy -o jsonpath='{.spec.template.spec.containers[0].image} x {.status.readyReplicas} ready{"\n"}'; kubectl get configmap notes-config -o jsonpath='{.data.ENVIRONMENT}{"\n"}'
+nginx:1.25 x 3 ready
+production
+
+$ kubectl exec deploy/notes-deploy -- printenv ENVIRONMENT
+production
+
+# the image change rolled the pods, so they read the new ConfigMap. Now change ONLY the ConfigMap:
+$ helm upgrade notes notes-chart -f notes-chart/values-prod.yaml --set app.environment=staging --wait --timeout 3m
+Release "notes" has been upgraded. Happy Helming!
+NAME: notes
+LAST DEPLOYED: Thu Oct  8 03:19:21 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 3
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+
+$ kubectl get configmap notes-config -o jsonpath='ConfigMap says: {.data.ENVIRONMENT}{"\n"}'; echo -n 'pod says:       '; kubectl exec deploy/notes-deploy -- printenv ENVIRONMENT
+ConfigMap says: staging
+pod says:       production
+
+$ kubectl get pods -l app=notes -o custom-columns=POD:.metadata.name,AGE:.metadata.creationTimestamp
+POD                             AGE
+notes-deploy-54f799c6f6-fb98x   2026-10-07T21:49:13Z
+notes-deploy-54f799c6f6-gxkck   2026-10-07T21:48:44Z
+notes-deploy-54f799c6f6-jngkx   2026-10-07T21:49:17Z
+
+# BUG: helm reports success, the ConfigMap changed, the pods did not restart and still run with the old value — envFrom is read only at container start
+# FIX: hash the ConfigMap into the pod template (checksum/config annotation) so any config change changes the template and triggers a rollout
+$ diff -r notes-chart notes-chart-fixed
+diff -r notes-chart/Chart.yaml notes-chart-fixed/Chart.yaml
+5c5
+< version: 0.1.0
+---
+> version: 0.1.1
+diff -r notes-chart/templates/deployment.yaml notes-chart-fixed/templates/deployment.yaml
+16a17,20
+>       annotations:
+>         # Pods only restart when the pod TEMPLATE changes. Hashing the rendered ConfigMap into
+>         # the template means any config change produces a new template, hence a rollout.
+>         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+
+$ helm upgrade notes notes-chart-fixed -f notes-chart-fixed/values-prod.yaml --set app.environment=staging --wait --timeout 3m >/dev/null && echo upgraded; helm upgrade notes notes-chart-fixed -f notes-chart-fixed/values-prod.yaml --set app.environment=production-eu --wait --timeout 3m >/dev/null && echo upgraded
+upgraded
+upgraded
+
+$ kubectl get configmap notes-config -o jsonpath='ConfigMap says: {.data.ENVIRONMENT}{"\n"}'; echo -n 'pod says:       '; kubectl exec deploy/notes-deploy -- printenv ENVIRONMENT
+ConfigMap says: production-eu
+pod says:       production-eu
+
+# rollback to the original production release
+$ helm history notes
+REVISION	UPDATED                 	STATUS    	CHART            	APP VERSION	DESCRIPTION     
+1       	Thu Oct  8 03:18:21 2026	superseded	notes-chart-0.1.0	1.0        	Install complete
+2       	Thu Oct  8 03:18:44 2026	superseded	notes-chart-0.1.0	1.0        	Upgrade complete
+3       	Thu Oct  8 03:19:21 2026	superseded	notes-chart-0.1.0	1.0        	Upgrade complete
+4       	Thu Oct  8 03:19:22 2026	superseded	notes-chart-0.1.1	1.0        	Upgrade complete
+5       	Thu Oct  8 03:19:27 2026	deployed  	notes-chart-0.1.1	1.0        	Upgrade complete
+
+$ helm rollback notes 2 --wait --timeout 3m
+Rollback was a success! Happy Helming!
+
+$ helm history notes; kubectl get configmap notes-config -o jsonpath='ConfigMap says: {.data.ENVIRONMENT}{"\n"}'; echo -n 'pod says:       '; kubectl exec deploy/notes-deploy -- printenv ENVIRONMENT
+REVISION	UPDATED                 	STATUS    	CHART            	APP VERSION	DESCRIPTION     
+1       	Thu Oct  8 03:18:21 2026	superseded	notes-chart-0.1.0	1.0        	Install complete
+2       	Thu Oct  8 03:18:44 2026	superseded	notes-chart-0.1.0	1.0        	Upgrade complete
+3       	Thu Oct  8 03:19:21 2026	superseded	notes-chart-0.1.0	1.0        	Upgrade complete
+4       	Thu Oct  8 03:19:22 2026	superseded	notes-chart-0.1.1	1.0        	Upgrade complete
+5       	Thu Oct  8 03:19:27 2026	superseded	notes-chart-0.1.1	1.0        	Upgrade complete
+6       	Thu Oct  8 03:19:31 2026	deployed  	notes-chart-0.1.0	1.0        	Rollback to 2   
+ConfigMap says: production
+pod says:       production
+
+$ kubectl run t --rm -i --quiet --restart=Never --image=curlimages/curl:8.11.1 -- curl -s http://notes-svc | grep -o "<title>.*</title>"
+<title>Welcome to nginx!</title>
+
+$ helm uninstall notes --wait && helm list
+release "notes" uninstalled
+NAME	NAMESPACE	REVISION	UPDATED	STATUS	CHART	APP VERSION
+

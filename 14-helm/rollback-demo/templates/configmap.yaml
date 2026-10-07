@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-page
+  labels:
+    {{- include "rollback-demo.labels" . | nindent 4 }}
+data:
+  index.html: |
+    {{ .Release.Name }} | revision {{ .Release.Revision }} | {{ .Values.message }} | nginx {{ .Values.image.tag }}

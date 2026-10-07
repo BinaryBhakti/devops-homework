@@ -1,0 +1,6 @@
+apiVersion: v2
+name: rollback-demo
+description: A tiny nginx app whose response names the release revision — built to make install/upgrade/rollback visible
+type: application
+version: 0.2.0
+appVersion: "1.26"

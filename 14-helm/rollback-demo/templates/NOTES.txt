@@ -1,0 +1,2 @@
+{{ .Release.Name }} revision {{ .Release.Revision }} deployed: nginx {{ .Values.image.tag }}, {{ .Values.replicaCount }} replica(s).
+Test it:  kubectl run t --rm -i --restart=Never --image=curlimages/curl -- curl -s http://{{ .Release.Name }}
