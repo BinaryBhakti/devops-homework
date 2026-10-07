@@ -1,0 +1,133 @@
+########## TASK 3 — Mini project: the multi-node storage bug, investigated and fixed ##########
+
+# INVESTIGATE — where does the data actually live?
+$ kubectl get pv $(kubectl -n production-webapp get pvc web-data -o jsonpath='{.spec.volumeName}') -o jsonpath='provisioner: {.metadata.annotations.pv\.kubernetes\.io/provisioned-by}{"\n"}hostPath:    {.spec.hostPath.path}{"\n"}nodeAffinity: {.spec.nodeAffinity}{"(none)"}{"\n"}'
+provisioner: k8s.io/minikube-hostpath
+hostPath:    /tmp/hostpath-provisioner/production-webapp/web-data
+nodeAffinity: (none)
+
+$ for n in minikube minikube-m02; do echo "--- $n:"; minikube ssh -n $n -- "ls -la /tmp/hostpath-provisioner/production-webapp/web-data/ 2>&1"; done
+--- minikube:
+total 12
+drwxrwxrwx 2 root root 4096 Oct  7 17:24 .
+drwxr-xr-x 3 root root 4096 Oct  7 17:23 ..
+-rw-r--r-- 1 root root   22 Oct  7 17:24 student.txt
+--- minikube-m02:
+total 8
+drwxr-xr-x 2 root root 4096 Oct  7 17:23 .
+drwxr-xr-x 3 root root 4096 Oct  7 17:23 ..
+
+# ROOT CAUSE: k8s.io/minikube-hostpath creates a hostPath PV with NO nodeAffinity. Kubernetes therefore thinks the volume is usable from any node; each node
+# silently creates its own empty /tmp/hostpath-provisioner/... directory. ReadWriteOnce is not enforced either — RWO means "one NODE", and nothing tells the
+# scheduler which node. The course test passes only if the replacement pod happens to land on the same node.
+# FIX — a provisioner that records the volume topology: the CSI hostpath driver addon
+$ minikube addons enable volumesnapshots 2>&1 | tail -1 && minikube addons enable csi-hostpath-driver 2>&1 | tail -1
+* The 'volumesnapshots' addon is enabled
+
+
+$ kubectl -n kube-system wait pod -l app.kubernetes.io/name=csi-hostpath-driver --for=condition=Ready --timeout=300s 2>/dev/null || kubectl -n kube-system get pods | grep csi
+csi-hostpath-attacher-0                1/1     Running             0                8m37s
+csi-hostpath-resizer-0                 0/1     ContainerCreating   0                8m34s
+csi-hostpathplugin-f9b8g               0/6     ContainerCreating   0                8m35s
+csi-hostpathplugin-vtqhp               0/6     ContainerCreating   0                8m35s
+
+$ kubectl get storageclass
+NAME                 PROVISIONER                RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
+csi-hostpath-sc      hostpath.csi.k8s.io        Delete          Immediate           false                  8m35s
+standard (default)   k8s.io/minikube-hostpath   Delete          Immediate           false                  19d
+
+$ cat pvc-csi.yaml && kubectl apply -f pvc-csi.yaml
+# Same claim, but from the CSI hostpath driver's StorageClass. Unlike k8s.io/minikube-hostpath,
+# this provisioner records WHICH node holds the volume (PV nodeAffinity), so the scheduler
+# places every pod that mounts it on that node.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: web-data-csi
+  namespace: production-webapp
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: csi-hostpath-sc
+  resources:
+    requests: { storage: 500Mi }
+persistentvolumeclaim/web-data-csi created
+
+$ kubectl -n production-webapp patch deploy web-app --type=json -p='[{"op":"replace","path":"/spec/template/spec/volumes/0/persistentVolumeClaim/claimName","value":"web-data-csi"}]' && kubectl -n production-webapp rollout status deploy/web-app --timeout=300s
+deployment.apps/web-app patched
+Waiting for deployment spec update to be observed...
+Waiting for deployment "web-app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "web-app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "web-app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "web-app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "web-app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "web-app" rollout to finish: 0 of 2 updated replicas are available...
+error: timed out waiting for the condition
+
+$ kubectl get pv $(kubectl -n production-webapp get pvc web-data-csi -o jsonpath='{.spec.volumeName}') -o jsonpath='provisioner: {.spec.csi.driver}{"\n"}nodeAffinity: {.spec.nodeAffinity.required.nodeSelectorTerms[0].matchExpressions[0].key} in {.spec.nodeAffinity.required.nodeSelectorTerms[0].matchExpressions[0].values}{"\n"}'
+provisioner: 
+nodeAffinity:  in 
+
+$ kubectl -n production-webapp get pods -l app=web-app -o wide
+NAME                       READY   STATUS    RESTARTS   AGE     IP       NODE     NOMINATED NODE   READINESS GATES
+web-app-7d58ff965c-6j6tz   0/1     Pending   0          4m24s   <none>   <none>   <none>           <none>
+web-app-7d58ff965c-qmlsh   0/1     Pending   0          4m25s   <none>   <none>   <none>           <none>
+
+# VERIFY — both replicas now on the volume node; write from one, read from the other, delete, read from the replacement
+$ P=($(kubectl -n production-webapp get pods -l app=web-app -o jsonpath='{.items[*].metadata.name}')); kubectl -n production-webapp exec ${P[0]} -- sh -c 'echo "Student: BinaryBhakti" > /data/student.txt'; for p in ${P[@]}; do echo "$p on $(kubectl -n production-webapp get pod $p -o jsonpath='{.spec.nodeName}'): $(kubectl -n production-webapp exec $p -- cat /data/student.txt)"; done
+error: unable to upgrade connection: pod web-app-7d58ff965c-6j6tz does not have a host assigned
+error: unable to upgrade connection: pod web-app-7d58ff965c-6j6tz does not have a host assigned
+web-app-7d58ff965c-6j6tz on : 
+error: unable to upgrade connection: pod web-app-7d58ff965c-qmlsh does not have a host assigned
+web-app-7d58ff965c-qmlsh on : 
+
+$ kubectl -n production-webapp delete pod $(kubectl -n production-webapp get pods -l app=web-app -o jsonpath='{.items[0].metadata.name}') && kubectl -n production-webapp rollout status deploy/web-app --timeout=180s >/dev/null; for p in $(kubectl -n production-webapp get pods -l app=web-app -o jsonpath='{.items[*].metadata.name}'); do echo "$p on $(kubectl -n production-webapp get pod $p -o jsonpath='{.spec.nodeName}'): $(kubectl -n production-webapp exec $p -- cat /data/student.txt)"; done
+pod "web-app-7d58ff965c-6j6tz" deleted from production-webapp namespace
+cat: /data/student.txt: No such file or directory
+command terminated with exit code 1
+web-app-7d58ff965c-86fzd on minikube: 
+cat: /data/student.txt: No such file or directory
+command terminated with exit code 1
+web-app-7d58ff965c-qmlsh on minikube: 
+
+$ kubectl -n production-webapp scale deploy web-app --replicas=4 && kubectl -n production-webapp rollout status deploy/web-app --timeout=180s >/dev/null; kubectl -n production-webapp get pods -l app=web-app -o wide
+deployment.apps/web-app scaled
+NAME                       READY   STATUS    RESTARTS   AGE     IP            NODE       NOMINATED NODE   READINESS GATES
+web-app-7d58ff965c-6j4wm   1/1     Running   0          12s     10.244.0.56   minikube   <none>           <none>
+web-app-7d58ff965c-86fzd   1/1     Running   0          58s     10.244.0.54   minikube   <none>           <none>
+web-app-7d58ff965c-nnwg9   1/1     Running   0          12s     10.244.0.57   minikube   <none>           <none>
+web-app-7d58ff965c-qmlsh   1/1     Running   0          5m25s   10.244.0.55   minikube   <none>           <none>
+
+# the trade-off, stated plainly: all replicas are now confined to ONE node. That is what RWO means. Spreading across nodes needs ReadWriteMany storage (NFS/EFS/CephFS)
+# or a design where each replica owns its data (StatefulSet + volumeClaimTemplates).
+$ kubectl -n production-webapp scale deploy web-app --replicas=2
+deployment.apps/web-app scaled
+
+########## VERIFY, re-run — the attempt above raced the CSI driver start-up (its images were still pulling), so the pods sat Pending ##########
+
+$ kubectl -n kube-system get pods -l app.kubernetes.io/instance=hostpath.csi.k8s.io -o wide 2>/dev/null | head -5; kubectl -n production-webapp get pvc
+NAME                       READY   STATUS              RESTARTS   AGE   IP       NODE           NOMINATED NODE   READINESS GATES
+csi-hostpathplugin-f9b8g   0/6     ContainerCreating   0          15m   <none>   minikube-m02   <none>           <none>
+csi-hostpathplugin-vtqhp   0/6     ContainerCreating   0          15m   <none>   minikube       <none>           <none>
+NAME           STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS      VOLUMEATTRIBUTESCLASS   AGE
+web-data       Bound    pvc-16c74489-02bb-48e7-80bb-98815ed5d380   500Mi      RWO            standard          <unset>                 37m
+web-data-csi   Bound    pvc-5e39cbeb-90d4-4b50-860e-8e4eaba236f2   500Mi      RWO            csi-hostpath-sc   <unset>                 6m49s
+
+$ kubectl get pv $(kubectl -n production-webapp get pvc web-data-csi -o jsonpath='{.spec.volumeName}') -o jsonpath='driver: {.spec.csi.driver}{"\n"}nodeAffinity: {.spec.nodeAffinity.required.nodeSelectorTerms[0].matchExpressions[0].key} in {.spec.nodeAffinity.required.nodeSelectorTerms[0].matchExpressions[0].values}{"\n"}'
+driver: hostpath.csi.k8s.io
+nodeAffinity: topology.hostpath.csi/node in ["minikube"]
+
+$ kubectl -n production-webapp rollout status deploy/web-app --timeout=180s && kubectl -n production-webapp get pods -l app=web-app -o wide
+deployment "web-app" successfully rolled out
+NAME                       READY   STATUS    RESTARTS   AGE     IP            NODE       NOMINATED NODE   READINESS GATES
+web-app-7d58ff965c-86fzd   1/1     Running   0          103s    10.244.0.54   minikube   <none>           <none>
+web-app-7d58ff965c-qmlsh   1/1     Running   0          6m10s   10.244.0.55   minikube   <none>           <none>
+
+$ P=($(kubectl -n production-webapp get pods -l app=web-app -o jsonpath='{.items[*].metadata.name}')); kubectl -n production-webapp exec ${P[0]} -- sh -c 'echo "Student: BinaryBhakti" > /data/student.txt'; for p in ${P[@]}; do echo "$p on $(kubectl -n production-webapp get pod $p -o jsonpath='{.spec.nodeName}'): $(kubectl -n production-webapp exec $p -- cat /data/student.txt)"; done
+web-app-7d58ff965c-86fzd on minikube: Student: BinaryBhakti
+web-app-7d58ff965c-qmlsh on minikube: Student: BinaryBhakti
+
+$ kubectl -n production-webapp delete pod $(kubectl -n production-webapp get pods -l app=web-app -o jsonpath='{.items[0].metadata.name}') && kubectl -n production-webapp rollout status deploy/web-app --timeout=180s >/dev/null; for p in $(kubectl -n production-webapp get pods -l app=web-app -o jsonpath='{.items[*].metadata.name}'); do echo "$p on $(kubectl -n production-webapp get pod $p -o jsonpath='{.spec.nodeName}'): $(kubectl -n production-webapp exec $p -- cat /data/student.txt)"; done
+pod "web-app-7d58ff965c-86fzd" deleted from production-webapp namespace
+web-app-7d58ff965c-qmlsh on minikube: Student: BinaryBhakti
+web-app-7d58ff965c-rzxdz on minikube: Student: BinaryBhakti
+

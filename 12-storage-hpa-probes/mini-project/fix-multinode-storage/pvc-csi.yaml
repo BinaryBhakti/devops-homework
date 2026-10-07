@@ -1,0 +1,13 @@
+# Same claim, but from the CSI hostpath driver's StorageClass. Unlike k8s.io/minikube-hostpath,
+# this provisioner records WHICH node holds the volume (PV nodeAffinity), so the scheduler
+# places every pod that mounts it on that node.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: web-data-csi
+  namespace: production-webapp
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: csi-hostpath-sc
+  resources:
+    requests: { storage: 500Mi }

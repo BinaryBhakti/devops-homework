@@ -1,0 +1,81 @@
+########## TASK 3 — Mini project HPA, re-run (the first run lost its metrics to the control-plane outage) ##########
+
+$ kubectl -n production-webapp get hpa web-app-hpa; kubectl -n production-webapp top pods -l app=web-app
+NAME          REFERENCE            TARGETS              MINPODS   MAXPODS   REPLICAS   AGE
+web-app-hpa   Deployment/web-app   cpu: <unknown>/50%   2         5         2          44m
+Error from server (ServiceUnavailable): the server is currently unable to handle the request (get pods.metrics.k8s.io)
+
+$ kubectl apply -f load-generator.yaml && kubectl -n production-webapp rollout status deploy/load-generator --timeout=120s
+deployment.apps/load-generator created
+Waiting for deployment spec update to be observed...
+Waiting for deployment spec update to be observed...
+Waiting for deployment "load-generator" rollout to finish: 0 out of 3 new replicas have been updated...
+Waiting for deployment "load-generator" rollout to finish: 0 of 3 updated replicas are available...
+Waiting for deployment "load-generator" rollout to finish: 1 of 3 updated replicas are available...
+Waiting for deployment "load-generator" rollout to finish: 2 of 3 updated replicas are available...
+deployment "load-generator" successfully rolled out
+
+----- 23:39:59
+web-app-hpa   Deployment/web-app   cpu: <unknown>/50%   2     5     2     45m
+Error from server (ServiceUnavailable): the server is currently unable to handle the request (get pods.metrics.k8s.io)
+----- 23:41:07
+web-app-hpa   Deployment/web-app   cpu: <unknown>/50%   2     5     2     47m
+error: Get "https://127.0.0.1:59830/apis": net/http: TLS handshake timeout - error from a previous attempt: http2: client connection lost
+----- 23:42:33
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 23:43:11
+Unable to connect to the server: net/http: TLS handshake timeout
+error: Metrics API not available
+----- 23:45:18
+web-app-hpa   Deployment/web-app   cpu: <unknown>/50%   2     5     2     51m
+Unable to connect to the server: EOF
+----- 23:46:19
+Unable to connect to the server: EOF
+error: Get "https://127.0.0.1:59830/api": net/http: TLS handshake timeout - error from a previous attempt: EOF
+----- 23:46:59
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 23:47:37
+web-app-hpa   Deployment/web-app   cpu: <unknown>/50%   2     5     2     53m
+error: Metrics API not available
+----- 23:48:18
+web-app-hpa   Deployment/web-app   cpu: <unknown>/50%   2     5     2     54m
+error: Metrics API not available
+----- 23:48:50
+Unable to connect to the server: net/http: TLS handshake timeout
+error: Metrics API not available
+----- 23:49:58
+web-app-hpa   Deployment/web-app   cpu: <unknown>/50%   2     5     2     55m
+error: Metrics API not available
+----- 23:50:17
+web-app-hpa   Deployment/web-app   cpu: <unknown>/50%   2     5     2     56m
+error: Metrics API not available
+----- 23:51:06
+Unable to connect to the server: net/http: TLS handshake timeout
+error: Get "https://127.0.0.1:59830/api": net/http: TLS handshake timeout - error from a previous attempt: unexpected EOF
+----- 23:52:30
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 23:53:10
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 23:53:52
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 23:54:30
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+----- 23:55:08
+Unable to connect to the server: net/http: TLS handshake timeout
+Unable to connect to the server: net/http: TLS handshake timeout
+$ kubectl -n production-webapp get pods -l app=web-app -o wide
+Unable to connect to the server: net/http: TLS handshake timeout
+
+$ kubectl -n production-webapp get events --field-selector involvedObject.name=web-app-hpa,reason=SuccessfulRescale -o custom-columns=TIME:.lastTimestamp,MESSAGE:.message
+TIME   MESSAGE
+Unable to connect to the server: net/http: TLS handshake timeout
+
+$ kubectl delete -f load-generator.yaml
+error: error when deleting "load-generator.yaml": Delete "https://127.0.0.1:59830/apis/apps/v1/namespaces/production-webapp/deployments/load-generator": net/http: TLS handshake timeout
+

@@ -1,0 +1,57 @@
+########## TASK 3 — Mini project: production-ready web app (deploy + verification tasks) ##########
+
+# Step 5.1–5.4 — namespace, PVC, deployment, service, HPA
+$ kubectl apply -f namespace.yaml
+namespace/production-webapp created
+
+$ kubectl apply -f pvc.yaml && kubectl get pvc -n production-webapp
+persistentvolumeclaim/web-data created
+NAME       STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+web-data   Pending                                      standard       <unset>                 0s
+
+$ kubectl apply -f deployment.yaml -f service.yaml && kubectl rollout status deploy/web-app -n production-webapp --timeout=180s
+deployment.apps/web-app created
+service/web-service created
+Waiting for deployment "web-app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "web-app" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "web-app" rollout to finish: 1 of 2 updated replicas are available...
+deployment "web-app" successfully rolled out
+
+$ kubectl get pods -n production-webapp -o wide
+NAME                      READY   STATUS    RESTARTS   AGE   IP             NODE           NOMINATED NODE   READINESS GATES
+web-app-d45775485-2x4j8   1/1     Running   0          20s   10.244.0.46    minikube       <none>           <none>
+web-app-d45775485-nf4ld   1/1     Running   0          20s   10.244.1.118   minikube-m02   <none>           <none>
+
+$ kubectl apply -f hpa.yaml && sleep 45 && kubectl get hpa -n production-webapp
+horizontalpodautoscaler.autoscaling/web-app-hpa created
+NAME          REFERENCE            TARGETS              MINPODS   MAXPODS   REPLICAS   AGE
+web-app-hpa   Deployment/web-app   cpu: <unknown>/50%   2         5         2          47s
+
+# Verification Task 1 — storage persistence (as written in the course)
+$ kubectl exec -n production-webapp $(kubectl -n production-webapp get pods -l app=web-app -o jsonpath='{.items[0].metadata.name}') -- sh -c 'echo "Student: BinaryBhakti" > /data/student.txt' && kubectl exec -n production-webapp $(kubectl -n production-webapp get pods -l app=web-app -o jsonpath='{.items[0].metadata.name}') -- cat /data/student.txt
+Student: BinaryBhakti
+
+$ OLD=$(kubectl -n production-webapp get pods -l app=web-app -o jsonpath='{.items[0].metadata.name}'); echo "deleting $OLD on $(kubectl -n production-webapp get pod $OLD -o jsonpath='{.spec.nodeName}')"; kubectl delete pod -n production-webapp $OLD
+deleting web-app-d45775485-2x4j8 on minikube
+pod "web-app-d45775485-2x4j8" deleted from production-webapp namespace
+
+$ kubectl rollout status deploy/web-app -n production-webapp --timeout=180s >/dev/null; kubectl get pods -n production-webapp -o wide
+NAME                      READY   STATUS    RESTARTS   AGE     IP             NODE           NOMINATED NODE   READINESS GATES
+web-app-d45775485-nf4ld   1/1     Running   0          2m18s   10.244.1.118   minikube-m02   <none>           <none>
+web-app-d45775485-rzx65   1/1     Running   0          55s     10.244.0.47    minikube       <none>           <none>
+
+$ for p in $(kubectl -n production-webapp get pods -l app=web-app -o jsonpath='{.items[*].metadata.name}'); do echo "$p on $(kubectl -n production-webapp get pod $p -o jsonpath='{.spec.nodeName}'): $(kubectl -n production-webapp exec $p -- cat /data/student.txt 2>&1)"; done
+web-app-d45775485-nf4ld on minikube-m02: cat: /data/student.txt: No such file or directory
+command terminated with exit code 1
+web-app-d45775485-rzx65 on minikube: Student: BinaryBhakti
+
+# Verification Task 2 — the Service
+$ kubectl -n production-webapp run web-check --rm -i --quiet --restart=Never --image=curlimages/curl:8.11.1 -- curl -s http://web-service | grep -i '<title>'
+warning: couldn't attach to pod/web-check, falling back to streaming logs: Internal error occurred: Internal error occurred: error attaching to container: failed to load task: no running task found: task 30ad3085215c4b1a9bd1ed3dc66980c0e661e1ec3bfbb42a71272ffe7f0928a1 not found
+<title>Welcome to nginx!</title>
+<title>Welcome to nginx!</title>
+
+$ kubectl get endpointslices -n production-webapp -l kubernetes.io/service-name=web-service
+NAME                ADDRESSTYPE   PORTS   ENDPOINTS                  AGE
+web-service-tgqgf   IPv4          80      10.244.1.118,10.244.0.47   3m1s
+

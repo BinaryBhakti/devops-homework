@@ -1,0 +1,94 @@
+########## TASK 3 — Mini project: HPA scale-out, then the probe challenges ##########
+
+# Verification Task 3 — load generator (course command, but with a CPU limit and kept off the control-plane node; see Task 2)
+$ kubectl -n production-webapp run load-generator --image=busybox:1.36 --restart=Never --overrides='{"spec":{"nodeSelector":{"kubernetes.io/hostname":"minikube-m02"},"containers":[{"name":"load-generator","image":"busybox:1.36","command":["/bin/sh","-c","while true; do wget -q -O- http://web-service >/dev/null; done"],"resources":{"limits":{"cpu":"300m"}}}]}}' && kubectl -n production-webapp wait pod/load-generator --for=condition=Ready --timeout=120s
+pod/load-generator created
+pod/load-generator condition met
+
+----- 22:56:57
+web-app-hpa   Deployment/web-app   cpu: <unknown>/50%   2     5     2     2m53s
+web-app-d45775485-nf4ld   Running   true   minikube-m02
+web-app-d45775485-rzx65   Running   true   minikube
+----- 22:57:13
+web-app-hpa   Deployment/web-app   cpu: <unknown>/50%   2     5     2     3m12s
+web-app-d45775485-nf4ld   Running   true   minikube-m02
+web-app-d45775485-rzx65   Running   true   minikube
+----- 22:57:33
+web-app-hpa   Deployment/web-app   cpu: 20%/50%   2     5     2     3m31s
+web-app-d45775485-nf4ld   Running   true   minikube-m02
+web-app-d45775485-rzx65   Running   true   minikube
+----- 22:57:51
+web-app-hpa   Deployment/web-app   cpu: 20%/50%   2     5     2     3m49s
+web-app-d45775485-nf4ld   Running   true   minikube-m02
+web-app-d45775485-rzx65   Running   true   minikube
+----- 22:58:09
+web-app-hpa   Deployment/web-app   cpu: 20%/50%   2     5     2     4m6s
+web-app-d45775485-nf4ld   Running   true   minikube-m02
+web-app-d45775485-rzx65   Running   true   minikube
+----- 22:58:25
+web-app-hpa   Deployment/web-app   cpu: 22%/50%   2     5     2     4m21s
+web-app-d45775485-nf4ld   Running   true   minikube-m02
+web-app-d45775485-rzx65   Running   true   minikube
+----- 22:58:41
+web-app-hpa   Deployment/web-app   cpu: 22%/50%   2     5     2     4m37s
+web-app-d45775485-nf4ld   Running   true   minikube-m02
+web-app-d45775485-rzx65   Running   true   minikube
+----- 22:58:56
+web-app-hpa   Deployment/web-app   cpu: 22%/50%   2     5     2     4m52s
+web-app-d45775485-nf4ld   Running   true   minikube-m02
+web-app-d45775485-rzx65   Running   true   minikube
+----- 22:59:12
+web-app-hpa   Deployment/web-app   cpu: 22%/50%   2     5     2     5m8s
+web-app-d45775485-nf4ld   Running   true   minikube-m02
+web-app-d45775485-rzx65   Running   true   minikube
+----- 22:59:27
+web-app-hpa   Deployment/web-app   cpu: 20%/50%   2     5     2     5m23s
+web-app-d45775485-nf4ld   Running   true   minikube-m02
+web-app-d45775485-rzx65   Running   true   minikube
+----- 23:09:15
+web-app-hpa   Deployment/web-app   cpu: 20%/50%   2     5     2     5m50s
+web-app-d45775485-nf4ld   Running   true   minikube-m02
+web-app-d45775485-rzx65   Running   true   minikube
+----- 23:09:42
+web-app-hpa   Deployment/web-app   cpu: 20%/50%   2     5     2     15m
+web-app-d45775485-nf4ld   Running   true   minikube-m02
+web-app-d45775485-rzx65   Running   true   minikube
+----- 23:10:00
+web-app-hpa   Deployment/web-app   cpu: 20%/50%   2     5     2     15m
+web-app-d45775485-nf4ld   Running   true   minikube-m02
+web-app-d45775485-rzx65   Running   true   minikube
+----- 23:10:17
+web-app-hpa   Deployment/web-app   cpu: 10%/50%   2     5     2     16m
+web-app-d45775485-nf4ld   Running   true   minikube-m02
+web-app-d45775485-rzx65   Running   true   minikube
+----- 23:10:41
+web-app-hpa   Deployment/web-app   cpu: 10%/50%   2     5     2     16m
+web-app-d45775485-nf4ld   Running   true   minikube-m02
+web-app-d45775485-rzx65   Running   true   minikube
+----- 23:11:19
+web-app-hpa   Deployment/web-app   cpu: <unknown>/50%   2     5     2     17m
+web-app-d45775485-nf4ld   Running   true   minikube-m02
+web-app-d45775485-rzx65   Running   true   minikube
+
+$ kubectl -n production-webapp describe hpa web-app-hpa | sed -n '/Events:/,$p'
+Events:
+  Type     Reason                        Age                 From                       Message
+  ----     ------                        ----                ----                       -------
+  Warning  FailedComputeMetricsReplicas  14m (x12 over 17m)  horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get cpu resource metric value: failed to get cpu utilization: unable to get metrics for resource cpu: unable to fetch metrics from resource metrics API: the server is currently unable to handle the request (get pods.metrics.k8s.io)
+  Warning  FailedGetResourceMetric       14m (x13 over 17m)  horizontal-pod-autoscaler  failed to get cpu utilization: unable to get metrics for resource cpu: unable to fetch metrics from resource metrics API: the server is currently unable to handle the request (get pods.metrics.k8s.io)
+  Warning  FailedGetResourceMetric       37s                 horizontal-pod-autoscaler  failed to get cpu utilization: unable to get metrics for resource cpu: no metrics returned from resource metrics API
+
+$ kubectl -n production-webapp top pods
+error: Metrics API not available
+
+$ kubectl -n production-webapp delete pod load-generator
+pod "load-generator" deleted from production-webapp namespace
+
+# the scaled-out pods are on BOTH nodes and all mount the same RWO PVC — what does each one see in /data?
+$ for p in $(kubectl -n production-webapp get pods -l app=web-app -o jsonpath='{.items[*].metadata.name}'); do echo "$p on $(kubectl -n production-webapp get pod $p -o jsonpath='{.spec.nodeName}'): $(kubectl -n production-webapp exec $p -- sh -c 'ls /data | tr "\n" " "; cat /data/student.txt 2>/dev/null || echo "(no student.txt)"')"; done
+web-app-d45775485-nf4ld on minikube-m02: (no student.txt)
+web-app-d45775485-rzx65 on minikube: student.txt Student: BinaryBhakti
+
+$ kubectl get pv $(kubectl -n production-webapp get pvc web-data -o jsonpath='{.spec.volumeName}') -o jsonpath='type: {.spec.hostPath.type} path: {.spec.hostPath.path} nodeAffinity: {.spec.nodeAffinity}{"\n"}'
+type:  path: /tmp/hostpath-provisioner/production-webapp/web-data nodeAffinity: 
+

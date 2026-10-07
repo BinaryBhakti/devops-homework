@@ -1,0 +1,93 @@
+########## TASK 3 — Mini project bonus: readiness gating and the liveness restart loop ##########
+
+$ kubectl -n production-webapp get hpa web-app-hpa; kubectl -n production-webapp get pods -l app=web-app
+NAME          REFERENCE            TARGETS              MINPODS   MAXPODS   REPLICAS   AGE
+web-app-hpa   Deployment/web-app   cpu: <unknown>/50%   2         5         2          18m
+NAME                      READY   STATUS    RESTARTS      AGE
+web-app-d45775485-nf4ld   1/1     Running   0             18m
+web-app-d45775485-rzx65   1/1     Running   1 (57s ago)   17m
+
+# the probes as deployed
+$ kubectl -n production-webapp get deploy web-app -o jsonpath='startup:   {.spec.template.spec.containers[0].startupProbe.httpGet.path} every {.spec.template.spec.containers[0].startupProbe.periodSeconds}s x {.spec.template.spec.containers[0].startupProbe.failureThreshold}{"\n"}readiness: {.spec.template.spec.containers[0].readinessProbe.httpGet.path} every {.spec.template.spec.containers[0].readinessProbe.periodSeconds}s x {.spec.template.spec.containers[0].readinessProbe.failureThreshold}{"\n"}liveness:  {.spec.template.spec.containers[0].livenessProbe.httpGet.path} every {.spec.template.spec.containers[0].livenessProbe.periodSeconds}s x {.spec.template.spec.containers[0].livenessProbe.failureThreshold}{"\n"}strategy:  {.spec.strategy.type}{"\n"}'
+startup:   / every 2s x 30
+readiness: / every 5s x 2
+liveness:  / every 5s x 3
+strategy:  Recreate
+
+# Challenge 2 — readiness path -> /does-not-exist
+$ kubectl -n production-webapp patch deploy web-app --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/does-not-exist"}]'
+deployment.apps/web-app patched
+
+$ sleep 40; kubectl -n production-webapp get pods -l app=web-app
+NAME                       READY   STATUS    RESTARTS   AGE
+web-app-5945bfc776-4sgdf   0/1     Running   0          37s
+web-app-5945bfc776-ctxzr   0/1     Running   0          37s
+
+$ kubectl -n production-webapp get endpointslices -l kubernetes.io/service-name=web-service
+NAME                ADDRESSTYPE   PORTS   ENDPOINTS                  AGE
+web-service-tgqgf   IPv4          80      10.244.1.121,10.244.0.48   19m
+
+$ kubectl -n production-webapp run c --rm -i --quiet --restart=Never --image=curlimages/curl:8.11.1 -- curl -s -m 3 -o /dev/null -w '%{http_code}\n' http://web-service; echo "curl exit code: $?"
+pod production-webapp/c terminated (Error)
+curl exit code: 7
+
+$ kubectl -n production-webapp describe pod $(kubectl -n production-webapp get pods -l app=web-app -o jsonpath='{.items[0].metadata.name}') | grep -E 'Readiness probe failed' | tail -1 | cut -c1-160
+  Warning  Unhealthy  5s (x6 over 30s)  kubelet            spec.containers{nginx}: Readiness probe failed: HTTP probe failed with statuscode: 404
+
+# Running but 0/1, no endpoints, and — because the strategy is Recreate — ALL old pods were killed first: a full outage, not a stalled rollout
+$ kubectl -n production-webapp rollout undo deploy/web-app && kubectl -n production-webapp rollout status deploy/web-app --timeout=180s
+Warning: resource deployments/web-app was previously managed with 'kubectl apply'. Rolling back will not update the kubectl.kubernetes.io/last-applied-configuration annotation, which may cause unexpected behavior on future 'kubectl apply' operations. Consider using 'kubectl apply' with your previous configuration file instead.
+deployment.apps/web-app rolled back
+Waiting for deployment spec update to be observed...
+Waiting for deployment "web-app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "web-app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "web-app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "web-app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "web-app" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "web-app" rollout to finish: 1 of 2 updated replicas are available...
+deployment "web-app" successfully rolled out
+
+$ kubectl -n production-webapp get endpointslices -l kubernetes.io/service-name=web-service
+NAME                ADDRESSTYPE   PORTS   ENDPOINTS                  AGE
+web-service-tgqgf   IPv4          80      10.244.0.49,10.244.1.123   19m
+
+# Challenge 3 — liveness path -> /crash
+$ kubectl -n production-webapp patch deploy web-app --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/crash"}]'
+deployment.apps/web-app patched
+
+$ kubectl -n production-webapp rollout status deploy/web-app --timeout=60s; sleep 60; kubectl -n production-webapp get pods -l app=web-app
+Waiting for deployment "web-app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "web-app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "web-app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "web-app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "web-app" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "web-app" rollout to finish: 1 of 2 updated replicas are available...
+deployment "web-app" successfully rolled out
+NAME                      READY   STATUS    RESTARTS      AGE
+web-app-85d86b65d-8dtzk   1/1     Running   2 (26s ago)   73s
+web-app-85d86b65d-xxwpt   0/1     Running   3 (1s ago)    74s
+
+$ kubectl -n production-webapp describe pod $(kubectl -n production-webapp get pods -l app=web-app -o jsonpath='{.items[0].metadata.name}') | sed -n '/Last State/,/Restart Count/p;/Events:/,$p' | grep -E 'Reason|Exit Code|Restart Count|Liveness probe failed|Killing' | cut -c1-170 | tail -6
+      Reason:       Completed
+      Exit Code:    0
+    Restart Count:  3
+  Type     Reason     Age               From               Message
+  Warning  Unhealthy  3s (x9 over 63s)  kubelet            spec.containers{nginx}: Liveness probe failed: HTTP probe failed with statuscode: 404
+  Normal   Killing    3s (x3 over 53s)  kubelet            spec.containers{nginx}: Container nginx failed liveness probe, will be restarted
+
+# nginx itself is perfectly healthy — the kubelet kills it every ~15 s (5 s period x 3 failures) because the probe asks the wrong question
+$ kubectl -n production-webapp rollout undo deploy/web-app && kubectl -n production-webapp rollout status deploy/web-app --timeout=180s && kubectl -n production-webapp get pods -l app=web-app
+Warning: resource deployments/web-app was previously managed with 'kubectl apply'. Rolling back will not update the kubectl.kubernetes.io/last-applied-configuration annotation, which may cause unexpected behavior on future 'kubectl apply' operations. Consider using 'kubectl apply' with your previous configuration file instead.
+deployment.apps/web-app rolled back
+Waiting for deployment spec update to be observed...
+Waiting for deployment "web-app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "web-app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "web-app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "web-app" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "web-app" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "web-app" rollout to finish: 1 of 2 updated replicas are available...
+deployment "web-app" successfully rolled out
+NAME                      READY   STATUS    RESTARTS   AGE
+web-app-d45775485-jtcr2   1/1     Running   0          14s
+web-app-d45775485-rpv6t   1/1     Running   0          14s
+
