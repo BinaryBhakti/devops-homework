@@ -4,8 +4,8 @@
 
 | | |
 |---|---|
-| **Name** | `<YOUR NAME>` |
-| **Enrollment Number** | `<YOUR ENROLLMENT NUMBER>` |
+| **Name** | Ashmit |
+| **Enrollment Number** | 24BCS10064 |
 | **Date** | 3 September 2026 |
 | **Application** | Node.js + Express, built with a multi-stage Dockerfile |
 | **Required text** | Hello World from Docker multi-stage build ✅ |
