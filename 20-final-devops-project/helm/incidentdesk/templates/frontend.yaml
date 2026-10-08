@@ -38,12 +38,21 @@ spec:
               value: "http://{{ $name }}-backend.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.backend.port }}"
           ports:
             - { name: http, containerPort: {{ $f.port }} }
+          # Startup first: liveness and readiness only begin once nginx answers. Without it, on a
+          # CPU-starved node the entrypoint scripts took longer than liveness allowed (3 x 10 s,
+          # 1 s timeout) and the kubelet killed nginx before it ever listened: CrashLoopBackOff.
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 2
+            failureThreshold: 60        # up to 2 minutes to start
           readinessProbe:
             httpGet: { path: /healthz, port: http }
             periodSeconds: 5
+            timeoutSeconds: 3
           livenessProbe:
             httpGet: { path: /healthz, port: http }
             periodSeconds: 10
+            timeoutSeconds: 3
           resources:
             {{- toYaml $f.resources | nindent 12 }}
           securityContext:

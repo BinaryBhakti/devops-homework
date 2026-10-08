@@ -16,8 +16,8 @@ server:
     requests: { cpu: 100m, memory: 192Mi }
     limits: { memory: 384Mi }
   global:
-    scrape_interval: 15s
-    evaluation_interval: 15s
+    scrape_interval: 30s
+    evaluation_interval: 30s
 alertmanager:
   enabled: false            # alerts still evaluate and show as pending/firing in Prometheus /alerts
 prometheus-pushgateway:
@@ -29,6 +29,27 @@ kube-state-metrics:
   resources:
     requests: { cpu: 10m, memory: 32Mi }
     limits: { memory: 64Mi }
+
+# Scrape jobs. This chart version builds prometheus.yml from the scrapeConfigs MAP (each key a
+# job with an `enabled` flag) — overriding serverFiles.prometheus.yml instead APPENDS to the
+# defaults and Prometheus refuses the duplicate job names (it crash-looped on exactly that).
+# The defaults also scrape the API server's own /metrics and every container's cAdvisor series,
+# which on this laptop node kept Prometheus and the API server busy enough for probes to time
+# out. Keep only what the dashboard and the alert rules use.
+scrapeConfigs:
+  kubernetes-api-servers: { enabled: false }
+  kubernetes-nodes: { enabled: false }
+  kubernetes-services: { enabled: false }
+  kubernetes-pods-slow: { enabled: false }
+  kubernetes-service-endpoints-slow: { enabled: false }
+  prometheus-pushgateway: { enabled: false }
+  kubernetes-nodes-cadvisor:
+    # container CPU / memory, only for the app namespace and only the two series the dashboard uses
+    metric_relabel_configs:
+      - { source_labels: [namespace], action: keep, regex: incidentdesk }
+      - { source_labels: [__name__], action: keep, regex: container_(cpu_usage_seconds_total|memory_working_set_bytes) }
+  # kept as-is: prometheus, kubernetes-pods (annotated IncidentDesk pods),
+  # kubernetes-service-endpoints (kube-state-metrics' annotated Service)
 
 serverFiles:
   alerting_rules.yml:
