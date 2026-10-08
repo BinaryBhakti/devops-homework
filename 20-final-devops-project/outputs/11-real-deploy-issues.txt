@@ -1,0 +1,36 @@
+########## REAL ISSUES on the first GitOps deploys (not injected) — evidence captured before the fixed pods replaced them ##########
+
+$ kubectl -n argocd get application incidentdesk-dev
+NAME               SYNC STATUS   HEALTH STATUS
+incidentdesk-dev   Unknown       Degraded
+
+$ kubectl -n incidentdesk get pods
+NAME                                    READY   STATUS    RESTARTS        AGE
+incidentdesk-backend-6466fbd968-6n5mx   1/1     Running   0               28m
+incidentdesk-backend-6466fbd968-rtc8t   0/1     Running   1 (3m5s ago)    18m
+incidentdesk-frontend-9c778c6c6-mqzdl   0/1     Running   9 (5m26s ago)   28m
+incidentdesk-postgres-0                 1/1     Running   3 (56m ago)     118m
+
+# ISSUE A — frontend: why does it keep restarting?
+$ kubectl -n incidentdesk get pod -l app.kubernetes.io/component=frontend -o jsonpath='{range .items[*]}{.metadata.name}: last={.status.containerStatuses[0].lastState.terminated.reason} exit={.status.containerStatuses[0].lastState.terminated.exitCode} restarts={.status.containerStatuses[0].restartCount}{"\n"}{end}'
+incidentdesk-frontend-9c778c6c6-mqzdl: last=OOMKilled exit=137 restarts=9
+
+$ kubectl -n incidentdesk get deploy incidentdesk-frontend -o jsonpath='limits: {.spec.template.spec.containers[0].resources.limits}{"\n"}'
+limits: {"cpu":"200m","memory":"64Mi"}
+
+$ kubectl get node minikube -o jsonpath='node CPUs: {.status.capacity.cpu}{"\n"}'; docker run --rm --entrypoint sh ghcr.io/binarybhakti/incidentdesk-frontend:sha-a95be67 -c "grep -n '^worker_processes' /etc/nginx/nginx.conf" 2>/dev/null || docker run --rm --entrypoint sh incidentdesk-frontend:local -c "grep -n '^worker_processes' /etc/nginx/nginx.conf"
+node CPUs: 8
+2:worker_processes  auto;
+
+# OOMKilled, exit 137: worker_processes auto -> one nginx worker per NODE CPU (8) inside a 64Mi limit. FIX (commit 87167ae): pin 2 workers in the image, limit 96Mi.
+# ISSUE B — backend: the HPA scaled 1 -> 3 while pods were still starting
+$ kubectl -n incidentdesk get events --field-selector involvedObject.kind=HorizontalPodAutoscaler -o custom-columns=TIME:.lastTimestamp,MESSAGE:.message | grep -i rescale | tail -4
+
+$ kubectl -n incidentdesk get events --field-selector involvedObject.kind=Pod --sort-by=.lastTimestamp | grep backend | grep -E 'Killing|startup probe|Liveness' | tail -4 | cut -c1-180
+21m         Normal    Killing                pod/incidentdesk-backend-6ff4f9b9d8-l5dfp    Container backend failed startup probe, will be restarted
+16m         Normal    Killing                pod/incidentdesk-backend-6ff4f9b9d8-l5dfp    Stopping container backend
+4m45s       Normal    Killing                pod/incidentdesk-backend-6466fbd968-rtc8t    Container backend failed liveness probe, will be restarted
+31s         Normal    Killing                pod/incidentdesk-backend-6466fbd968-rtc8t    Container backend failed startup probe, will be restarted
+
+# Python start-up CPU read as 550% of the 50m request -> HPA scale-out -> three starting pods + three migrations starving each other -> probe kills.
+# FIXES: scaleUp stabilizationWindowSeconds 180, dev maxReplicas 2, startup budget 3 min, liveness timeout 5 s (commits 6710b57, 5476e02, a95be67).

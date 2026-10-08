@@ -1,0 +1,116 @@
+########## MONITORING — lean Prometheus + Grafana in the cluster (namespace created by Terraform) ##########
+
+$ helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null 2>&1; helm repo add grafana-community https://grafana-community.github.io/helm-charts >/dev/null 2>&1; helm repo update >/dev/null 2>&1; helm search repo -l prometheus-community/prometheus --max-col-width 40 | head -2; helm search repo grafana-community/grafana --max-col-width 40 | head -2
+NAME                                    	CHART VERSION	APP VERSION	DESCRIPTION                             
+prometheus-community/prometheus         	29.36.0      	v3.15.0    	Prometheus is a monitoring system and...
+NAME                         	CHART VERSION	APP VERSION	DESCRIPTION                             
+grafana-community/grafana    	13.3.1       	13.2.3     	The leading tool for querying and vis...
+
+$ helm upgrade --install prometheus prometheus-community/prometheus -n monitoring -f prometheus-values.yaml --wait --timeout 6m | grep -E "^(NAME|STATUS|REVISION)"
+NAME: prometheus
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+
+$ helm upgrade --install grafana grafana-community/grafana -n monitoring -f grafana-values.yaml --wait --timeout 6m | grep -E "^(NAME|STATUS|REVISION)"
+Error: resource Deployment/monitoring/grafana not ready. status: InProgress, message: Available: 0/1
+context deadline exceeded
+
+$ kubectl -n monitoring get pods
+NAME                                             READY   STATUS    RESTARTS   AGE
+grafana-559d85d965-5mwdp                         0/1     Running   0          6m3s
+prometheus-kube-state-metrics-7f67587b9d-72vxh   0/1     Running   0          7m41s
+prometheus-server-6f866fff54-xqq5c               1/2     Running   0          7m41s
+
+$ kubectl -n monitoring top pods 2>/dev/null || echo '(metrics not ready yet)'
+(metrics not ready yet)
+
+# Grafana never became Ready: killed during its first start (migrations + plugin cache) with a 256Mi limit on the loaded node — raise the limit
+$ kubectl -n monitoring get pod -l app.kubernetes.io/name=grafana -o jsonpath='{range .items[0].status.containerStatuses[*]}{.name} ready={.ready} restarts={.restartCount} last={.lastState.terminated.reason}/{.lastState.terminated.exitCode}{"\n"}{end}'
+grafana ready=false restarts=8 last=Error/2
+
+$ helm upgrade --install grafana grafana-community/grafana -n monitoring -f grafana-values.yaml --wait --timeout 8m | grep -E "^(NAME|STATUS|REVISION)"
+level=WARN msg="upgrade failed" name=grafana error="resource Deployment/monitoring/grafana not ready. status: InProgress, message: Pending termination: 1\ncontext deadline exceeded"
+Error: UPGRADE FAILED: resource Deployment/monitoring/grafana not ready. status: InProgress, message: Pending termination: 1
+context deadline exceeded
+
+$ kubectl -n monitoring get pods
+NAME                                             READY   STATUS    RESTARTS         AGE
+grafana-559d85d965-5mwdp                         0/1     Running   10 (5m32s ago)   44m
+grafana-85f46bbd85-nnpvm                         0/1     Running   0                7m57s
+prometheus-kube-state-metrics-7f67587b9d-72vxh   1/1     Running   6 (7m16s ago)    46m
+prometheus-server-6f866fff54-xqq5c               2/2     Running   8 (4m57s ago)    46m
+
+# Prometheus itself restarted repeatedly on liveness timeouts: the chart default scrapes the API server and every container. Trim to what is used.
+$ kubectl -n monitoring get pods -o custom-columns=POD:.metadata.name,RESTARTS:.status.containerStatuses[0].restartCount
+POD                                              RESTARTS
+grafana-559d85d965-5mwdp                         10
+grafana-85f46bbd85-nnpvm                         0
+prometheus-kube-state-metrics-7f67587b9d-72vxh   6
+prometheus-server-6f866fff54-xqq5c               3
+
+$ grep -E 'job_name' prometheus-values.yaml
+      - job_name: prometheus
+      - job_name: kubernetes-pods
+      - job_name: kube-state-metrics
+      - job_name: kubernetes-nodes-cadvisor
+
+$ helm upgrade --install prometheus prometheus-community/prometheus -n monitoring -f prometheus-values.yaml --wait --timeout 8m | grep -E "^(NAME|STATUS|REVISION)"
+level=WARN msg="upgrade failed" name=prometheus error="resource Deployment/monitoring/prometheus-server not ready. status: InProgress, message: Available: 0/1\ncontext deadline exceeded"
+Error: UPGRADE FAILED: resource Deployment/monitoring/prometheus-server not ready. status: InProgress, message: Available: 0/1
+context deadline exceeded
+
+# that upgrade crash-looped Prometheus: "found multiple scrape configs with job name". This chart builds jobs from the scrapeConfigs map and APPENDS serverFiles ones.
+# FIX: disable unwanted default jobs through scrapeConfigs.<job>.enabled=false instead
+$ helm template p prometheus-community/prometheus -f prometheus-values.yaml | grep -E '^\s*- job_name'
+    - job_name: kubernetes-nodes-cadvisor
+    - job_name: kubernetes-pods
+    - job_name: kubernetes-service-endpoints
+    - job_name: prometheus
+
+$ helm upgrade --install prometheus prometheus-community/prometheus -n monitoring -f prometheus-values.yaml --wait --timeout 8m | grep -E "^(NAME|STATUS|REVISION)"
+NAME: prometheus
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 3
+
+$ kubectl -n monitoring get pods
+NAME                                             READY   STATUS    RESTARTS         AGE
+grafana-85f46bbd85-nnpvm                         1/1     Running   2 (11m ago)      24m
+prometheus-kube-state-metrics-7f67587b9d-72vxh   1/1     Running   8 (9m20s ago)    63m
+prometheus-server-6f866fff54-xqq5c               2/2     Running   16 (5m57s ago)   63m
+
+$ kubectl -n monitoring exec deploy/prometheus-server -c prometheus-server -- wget -qO- localhost:9090/api/v1/targets | python3 -c 'import json,sys; [print("  ", t["labels"]["job"].ljust(30), t["health"]) for t in json.load(sys.stdin)["data"]["activeTargets"]]'
+   kubernetes-nodes-cadvisor      up
+   kubernetes-nodes-cadvisor      down
+   kubernetes-service-endpoints   up
+   kubernetes-service-endpoints   up
+   kubernetes-service-endpoints   unknown
+   prometheus                     up
+
+# Prometheus kept restarting on liveness timeouts while replaying its WAL on the starved node; each restart replays the WAL again. Give the probes slack.
+$ kubectl -n monitoring get pods -o custom-columns=POD:.metadata.name,RESTARTS:.status.containerStatuses[0].restartCount
+POD                                              RESTARTS
+grafana-85f46bbd85-nnpvm                         2
+prometheus-kube-state-metrics-7f67587b9d-72vxh   15
+prometheus-server-6f866fff54-xqq5c               10
+
+$ grep -E 'Probe' prometheus-values.yaml
+  # Probe slack for a CPU-starved laptop node: with the defaults (liveness 3 x 15 s, 10 s timeout)
+  livenessProbeInitialDelay: 120
+  livenessProbeTimeout: 20
+  livenessProbeFailureThreshold: 6
+  readinessProbeTimeout: 10
+  readinessProbeFailureThreshold: 6
+
+$ helm upgrade --install prometheus prometheus-community/prometheus -n monitoring -f prometheus-values.yaml --timeout 10m --wait | grep -E "^(STATUS|REVISION)"
+level=WARN msg="upgrade failed" name=prometheus error="resource Deployment/monitoring/prometheus-kube-state-metrics not ready. status: InProgress, message: Available: 0/1\ncontext deadline exceeded"
+Error: UPGRADE FAILED: resource Deployment/monitoring/prometheus-kube-state-metrics not ready. status: InProgress, message: Available: 0/1
+context deadline exceeded
+
+$ kubectl -n monitoring get pods
+NAME                                             READY   STATUS    RESTARTS       AGE
+grafana-85f46bbd85-nnpvm                         0/1     Running   2 (49m ago)    62m
+prometheus-kube-state-metrics-7f67587b9d-72vxh   0/1     Running   16 (11m ago)   101m
+prometheus-server-55bfbb7b8b-lc76p               1/2     Running   2 (2m8s ago)   9m40s
+

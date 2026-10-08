@@ -1,0 +1,76 @@
+########## GITOPS DEPLOY — Argo CD deploys what CI published to the gitops-config branch ##########
+
+# what CI wrote (job "gitops" of pipeline run 2, as github-actions[bot]):
+$ git fetch -q origin gitops-config && git log -1 --format="%h %an %ad%n%s" --date=iso origin/gitops-config
+9598b59 github-actions[bot] 2026-10-08 06:40:34 +0000
+gitops: deploy incidentdesk sha-0c01e2b to dev [skip ci]
+
+$ git show origin/gitops-config:incidentdesk/values-dev.yaml | grep -n 'tag:'
+8:    tag: "sha-0c01e2b"              # updated by the CI "gitops" job on every main build
+12:    tag: "sha-0c01e2b"              # updated by the CI "gitops" job on every main build
+
+$ cat gitops/application-dev.yaml | grep -vE "^\s*#" | sed -n "/spec:/,/destination/p"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/BinaryBhakti/devops-homework.git
+    targetRevision: gitops-config   # small environment branch; see README (Homework 19 explains why)
+    path: incidentdesk
+    helm:
+      releaseName: incidentdesk
+      valueFiles:
+        - values-dev.yaml        # its image tags are bumped by the CI "gitops" job
+  destination:
+
+$ kubectl apply -f gitops/application-dev.yaml
+Warning: metadata.finalizers: "resources-finalizer.argocd.argoproj.io": prefer a domain-qualified finalizer name including a path (/) to avoid accidental conflicts with other finalizer writers
+application.argoproj.io/incidentdesk-dev created
+
+$ for i in $(seq 1 60); do s=$(kubectl -n argocd get application incidentdesk-dev -o jsonpath='{.status.sync.status}/{.status.health.status}'); [ "$s" = Synced/Healthy ] && break; sleep 10; done; kubectl -n argocd get application incidentdesk-dev
+NAME               SYNC STATUS   HEALTH STATUS
+incidentdesk-dev   OutOfSync     Degraded
+
+$ kubectl -n argocd get application incidentdesk-dev -o jsonpath='synced revision: {.status.sync.revision}{"\n"}'
+synced revision: 9598b59cee07eedbcd44bb5080319426f6fc39b0
+
+$ kubectl -n incidentdesk get deploy,statefulset,svc,ingress,hpa,pvc
+NAME                                    READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/incidentdesk-backend    0/1     1            0           12m
+deployment.apps/incidentdesk-frontend   0/1     1            0           12m
+
+NAME                                     READY   AGE
+statefulset.apps/incidentdesk-postgres   1/1     12m
+
+NAME                            TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE
+service/incidentdesk-backend    ClusterIP   10.97.37.97    <none>        8000/TCP   12m
+service/incidentdesk-frontend   ClusterIP   10.96.148.49   <none>        80/TCP     12m
+service/incidentdesk-postgres   ClusterIP   None           <none>        5432/TCP   12m
+
+NAME                                     CLASS   HOSTS                ADDRESS        PORTS   AGE
+ingress.networking.k8s.io/incidentdesk   nginx   incidentdesk.local   192.168.49.2   80      12m
+
+NAME                                                       REFERENCE                         TARGETS              MINPODS   MAXPODS   REPLICAS   AGE
+horizontalpodautoscaler.autoscaling/incidentdesk-backend   Deployment/incidentdesk-backend   cpu: <unknown>/60%   1         3         1          12m
+
+NAME                                                 STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+persistentvolumeclaim/data-incidentdesk-postgres-0   Bound    pvc-c2307c1f-91ab-4f75-b647-2e6c9781c5b2   1Gi        RWO            standard       <unset>                 12m
+
+$ kubectl -n incidentdesk get pods -o wide
+NAME                                    READY   STATUS    RESTARTS        AGE   IP             NODE       NOMINATED NODE   READINESS GATES
+incidentdesk-backend-68f5d6fb9d-lnnql   0/1     Running   1 (24s ago)     12m   10.244.0.128   minikube   <none>           <none>
+incidentdesk-frontend-89d467bf9-9t4kz   0/1     Running   6 (2m15s ago)   12m   10.244.0.129   minikube   <none>           <none>
+incidentdesk-postgres-0                 1/1     Running   1 (8m20s ago)   12m   10.244.0.130   minikube   <none>           <none>
+
+$ kubectl -n incidentdesk get deploy incidentdesk-backend incidentdesk-frontend -o jsonpath='{range .items[*]}{.metadata.name}: {.spec.template.spec.containers[0].image}{"\n"}{end}'
+incidentdesk-backend: ghcr.io/binarybhakti/incidentdesk-backend:sha-0c01e2b
+incidentdesk-frontend: ghcr.io/binarybhakti/incidentdesk-frontend:sha-0c01e2b
+
+$ kubectl -n incidentdesk describe resourcequota | sed -n "/Resource/,\$p"
+Resource                Used   Hard
+--------                ----   ----
+limits.memory           576Mi  3Gi
+persistentvolumeclaims  1      4
+pods                    3      20
+requests.cpu            120m   1500m
+requests.memory         256Mi  1536Mi
+
