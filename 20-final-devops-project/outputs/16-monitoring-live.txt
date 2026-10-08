@@ -1,0 +1,69 @@
+########## MONITORING (live) — Prometheus scraping IncidentDesk in the cluster, with light synthetic traffic running ##########
+
+$ curl -s localhost:9091/api/v1/targets | python3 -c 'import json,sys; [print("  ", t["labels"]["job"].ljust(30), t["health"].ljust(7), t["labels"].get("namespace",""), t["labels"].get("pod","")) for t in json.load(sys.stdin)["data"]["activeTargets"]]'
+   kubernetes-nodes-cadvisor      down     
+   kubernetes-nodes-cadvisor      down     
+   kubernetes-pods                up      incidentdesk incidentdesk-backend-858d7fbb8b-xxb99
+   kubernetes-pods                down    incidentdesk incidentdesk-backend-858d7fbb8b-dkxgh
+   kubernetes-service-endpoints   up      monitoring 
+   kubernetes-service-endpoints   up      monitoring 
+   kubernetes-service-endpoints   up      kube-system 
+   prometheus                     up       
+
+# (the one "down" cAdvisor target is the stopped worker node)
+# METRICS — request rate by route and status (RED: Rate, Errors)
+$ PQ 'sum by (handler, status) (rate(http_requests_total{namespace="incidentdesk"}[2m]))'
+   {'handler': '/api/incidents', 'status': '2xx'} => 0.0632
+   {'handler': '/api/incidents/stats', 'status': '2xx'} => 0.0333
+   {'handler': '/api/incidents/{incident_id}', 'status': '4xx'} => 0.0
+
+# latency (RED: Duration)
+$ PQ 'histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{namespace="incidentdesk"}[5m])))'
+    => 0.8833
+
+# business metric: incidents opened, by severity (per pod — each replica counts its own)
+$ PQ 'sum by (severity) (incidents_created_total{namespace="incidentdesk"})'
+   (no data)
+
+# CPU and MEMORY per pod (kubelet cAdvisor, app namespace only)
+$ PQ 'sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="incidentdesk",container!=""}[2m]))'
+   (no data)
+
+$ PQ 'sum by (pod) (container_memory_working_set_bytes{namespace="incidentdesk",container!=""}) / 1024 / 1024'
+   {'pod': 'incidentdesk-backend-858d7fbb8b-xxb99'} => 126.7891
+   {'pod': 'incidentdesk-backend-858d7fbb8b-dkxgh'} => 131.4258
+   {'pod': 'incidentdesk-frontend-765f5c78f-tkjmh'} => 19.7344
+   {'pod': 'incidentdesk-postgres-0'} => 45.6484
+
+# HEALTH — pods ready and the HPA, from kube-state-metrics
+$ PQ 'sum by (pod) (kube_pod_status_ready{namespace="incidentdesk",condition="true"})'
+   {'pod': 'incidentdesk-backend-858d7fbb8b-xxb99'} => 1.0
+   {'pod': 'incidentdesk-backend-858d7fbb8b-dkxgh'} => 1.0
+   {'pod': 'incidentdesk-frontend-765f5c78f-tkjmh'} => 1.0
+   {'pod': 'incidentdesk-postgres-0'} => 1.0
+
+$ PQ 'kube_horizontalpodautoscaler_status_current_replicas{namespace="incidentdesk"}'
+   {'horizontalpodautoscaler': 'incidentdesk-backend'} => 2.0
+
+# ALERTS — the IncidentDesk rules and their state
+$ curl -s localhost:9091/api/v1/rules | python3 -c 'import json,sys; [print("  ", r["name"].ljust(28), r["state"]) for g in json.load(sys.stdin)["data"]["groups"] for r in g["rules"]]'
+   IncidentDeskBackendDown      pending
+   IncidentDeskPodNotReady      inactive
+   IncidentDeskPodRestarting    inactive
+   IncidentDeskHighErrorRate    inactive
+   IncidentDeskHighLatencyP95   firing
+   IncidentDeskHPAAtMax         pending
+
+$ curl -s localhost:9091/api/v1/alerts | python3 -c 'import json,sys; [print("  ", a["labels"]["alertname"], a["state"], "-", a["annotations"].get("summary","")) for a in json.load(sys.stdin)["data"]["alerts"]]'
+   IncidentDeskHighLatencyP95 firing - API p95 latency is 963ms
+   IncidentDeskHPAAtMax pending - HPA incidentdesk-backend has been at max replicas for 10 minutes — capacity, not just load
+   IncidentDeskBackendDown pending - No IncidentDesk backend pod is being scraped successfully
+
+# LOGS — the app logs to stdout; kubectl logs reads them (Loki/Alloy is the central store in Homework 19; not installed here to fit the laptop)
+$ kubectl -n incidentdesk logs deploy/incidentdesk-backend -c backend --tail=4 | cut -c1-160
+Found 2 pods, using pod/incidentdesk-backend-858d7fbb8b-xxb99
+INFO:     Waiting for background tasks to complete. (CTRL+C to force quit)
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [1]
+
