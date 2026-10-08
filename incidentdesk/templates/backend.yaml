@@ -1,0 +1,103 @@
+{{- $name := include "incidentdesk.fullname" . }}
+{{- $b := .Values.backend }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-backend
+  labels:
+    {{- include "incidentdesk.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  {{- if not .Values.hpa.enabled }}
+  replicas: {{ $b.replicas }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  strategy:
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels:
+      {{- include "incidentdesk.selector" (dict "ctx" . "component" "backend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "incidentdesk.selector" (dict "ctx" . "component" "backend") | nindent 8 }}
+      annotations:
+        # pods only restart when the template changes: hash config + secret into it
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- if .Values.metrics.podAnnotations }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ $b.port | quote }}
+        prometheus.io/path: /metrics
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      initContainers:
+        - name: wait-for-db
+          image: {{ .Values.postgres.image }}
+          command: ["sh", "-c", "until pg_isready -h \"$DB_HOST\" -q; do echo waiting for $DB_HOST; sleep 2; done"]
+          envFrom: [{ configMapRef: { name: {{ $name }}-config } }]
+          securityContext:
+            runAsUser: 70
+            {{- include "incidentdesk.containerSecurity" . | nindent 12 }}
+        - name: migrate
+          image: "{{ $b.image.repository }}:{{ $b.image.tag }}"
+          imagePullPolicy: {{ $b.image.pullPolicy }}
+          command: ["alembic", "upgrade", "head"]
+          envFrom: [{ configMapRef: { name: {{ $name }}-config } }]
+          env:
+            {{- include "incidentdesk.dbEnv" . | nindent 12 }}
+          securityContext:
+            {{- include "incidentdesk.containerSecurity" . | nindent 12 }}
+      containers:
+        - name: backend
+          image: "{{ $b.image.repository }}:{{ $b.image.tag }}"
+          imagePullPolicy: {{ $b.image.pullPolicy }}
+          command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "{{ $b.port }}", "--proxy-headers"]
+          ports:
+            - { name: http, containerPort: {{ $b.port }} }
+          envFrom: [{ configMapRef: { name: {{ $name }}-config } }]
+          env:
+            {{- include "incidentdesk.dbEnv" . | nindent 12 }}
+          startupProbe:
+            httpGet: { path: {{ $b.probes.startup.path }}, port: http }
+            periodSeconds: {{ $b.probes.startup.periodSeconds }}
+            failureThreshold: {{ $b.probes.startup.failureThreshold }}
+          readinessProbe:
+            httpGet: { path: {{ $b.probes.readiness.path }}, port: http }
+            periodSeconds: {{ $b.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ $b.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ $b.probes.readiness.failureThreshold }}
+          livenessProbe:
+            httpGet: { path: {{ $b.probes.liveness.path }}, port: http }
+            periodSeconds: {{ $b.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ $b.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ $b.probes.liveness.failureThreshold }}
+          resources:
+            {{- toYaml $b.resources | nindent 12 }}
+          securityContext:
+            {{- include "incidentdesk.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: tmp, emptyDir: { sizeLimit: 16Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-backend
+  labels:
+    {{- include "incidentdesk.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  selector:
+    {{- include "incidentdesk.selector" (dict "ctx" . "component" "backend") | nindent 4 }}
+  ports:
+    - { name: http, port: {{ $b.port }}, targetPort: http }

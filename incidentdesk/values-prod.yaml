@@ -1,0 +1,21 @@
+# Production-shaped: HA replicas, TLS, credentials from a pre-created Secret
+# (Sealed Secrets / External Secrets Operator / Vault), never from Git.
+backend:
+  replicas: 3
+frontend:
+  replicas: 2
+config:
+  APP_ENV: production
+  LOG_LEVEL: info
+postgres:
+  existingSecret: incidentdesk-db      # kubectl create secret generic incidentdesk-db --from-literal=password=...
+  storage: 10Gi
+hpa:
+  minReplicas: 3
+  maxReplicas: 10
+ingress:
+  host: incidentdesk.example.com
+  tls: true
+metrics:
+  serviceMonitor:
+    enabled: true

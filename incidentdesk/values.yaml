@@ -1,0 +1,77 @@
+# Defaults are production-shaped. values-dev.yaml / values-prod.yaml override per environment.
+
+backend:
+  image:
+    repository: ghcr.io/binarybhakti/incidentdesk-backend
+    tag: "latest"            # CI pins this to the commit SHA (see gitops/ and the workflow)
+    pullPolicy: IfNotPresent
+  replicas: 2
+  port: 8000
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  probes:
+    # startup: give Alembic + Python import time before liveness starts judging
+    startup: { path: /health, periodSeconds: 3, failureThreshold: 20 }
+    readiness: { path: /ready, periodSeconds: 5, timeoutSeconds: 2, failureThreshold: 2 }
+    liveness: { path: /health, periodSeconds: 10, timeoutSeconds: 2, failureThreshold: 3 }
+
+frontend:
+  image:
+    repository: ghcr.io/binarybhakti/incidentdesk-frontend
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicas: 2
+  port: 8080
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 64Mi }
+
+# Non-secret configuration -> ConfigMap -> env
+config:
+  APP_ENV: production
+  LOG_LEVEL: info
+
+postgres:
+  enabled: true
+  image: postgres:16-alpine
+  database: incidentdesk
+  username: incidentdesk
+  # Leave empty and set existingSecret (key "password") in any real environment.
+  # The chart refuses to render with neither — there is no default password.
+  password: ""
+  existingSecret: ""
+  storage: 1Gi
+  storageClassName: ""       # "" = cluster default
+  nodeSelector: {}
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 256Mi }
+
+imagePullSecrets: []
+
+ingress:
+  enabled: true
+  className: nginx
+  host: incidentdesk.local
+  tls: false
+  tlsSecretName: incidentdesk-tls
+
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 60
+
+pdb:
+  enabled: true
+  minAvailable: 1
+
+metrics:
+  # prometheus.io/* annotations: picked up by the plain prometheus-community/prometheus chart
+  podAnnotations: true
+  # ServiceMonitor: only for clusters running the Prometheus Operator (kube-prometheus-stack)
+  serviceMonitor:
+    enabled: false
+    labels: { release: kube-prometheus-stack }
+    interval: 15s

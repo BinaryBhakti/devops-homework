@@ -1,0 +1,11 @@
+apiVersion: v2
+name: incidentdesk
+description: IncidentDesk — FastAPI + React + PostgreSQL incident tracker (DevOps final project)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+home: https://github.com/BinaryBhakti/devops-homework/tree/main/20-final-devops-project
+sources:
+  - https://github.com/BinaryBhakti/devops-homework
+maintainers:
+  - name: BinaryBhakti

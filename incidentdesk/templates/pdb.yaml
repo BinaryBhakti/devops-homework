@@ -1,0 +1,16 @@
+{{- if .Values.pdb.enabled }}
+{{- range $component := list "backend" "frontend" }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "incidentdesk.fullname" $ }}-{{ $component }}
+  labels:
+    {{- include "incidentdesk.labels" $ | nindent 4 }}
+spec:
+  minAvailable: {{ $.Values.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "incidentdesk.selector" (dict "ctx" $ "component" $component) | nindent 6 }}
+{{- end }}
+{{- end }}
