@@ -1,0 +1,7 @@
+IncidentDesk {{ .Chart.AppVersion }} — release {{ .Release.Name }} (revision {{ .Release.Revision }}) in {{ .Release.Namespace }}
+  backend:  {{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}
+  frontend: {{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}
+{{- if .Values.ingress.enabled }}
+  URL:      http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.host }}/
+{{- end }}
+Check:  kubectl -n {{ .Release.Namespace }} get pods,svc,ingress,hpa

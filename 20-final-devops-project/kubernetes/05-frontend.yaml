@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incidentdesk-frontend
+  namespace: incidentdesk
+spec:
+  replicas: 2
+  strategy:
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: { app.kubernetes.io/component: frontend }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: incidentdesk, app.kubernetes.io/component: frontend }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 101, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: frontend
+          image: ghcr.io/binarybhakti/incidentdesk-frontend:latest
+          env:
+            # FQDN: nginx's runtime resolver does not apply the pod's DNS search domains
+            - { name: BACKEND_URL, value: "http://incidentdesk-backend.incidentdesk.svc.cluster.local:8000" }
+          ports: [{ name: http, containerPort: 8080 }]
+          readinessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 10 }
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { cpu: 200m, memory: 64Mi }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: conf, mountPath: /etc/nginx/conf.d }   # envsubst renders default.conf here
+      volumes:
+        - { name: tmp, emptyDir: { sizeLimit: 16Mi } }
+        - { name: conf, emptyDir: { sizeLimit: 1Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: incidentdesk-frontend
+  namespace: incidentdesk
+spec:
+  selector: { app.kubernetes.io/component: frontend }
+  ports: [{ name: http, port: 80, targetPort: http }]

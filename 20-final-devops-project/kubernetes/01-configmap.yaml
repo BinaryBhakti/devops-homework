@@ -1,0 +1,13 @@
+# Non-secret settings. Changing this does NOT restart pods by itself — roll the Deployment
+# (the Helm chart does that automatically with a checksum annotation).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: incidentdesk-config
+  namespace: incidentdesk
+data:
+  APP_ENV: production
+  LOG_LEVEL: info
+  DB_HOST: incidentdesk-postgres
+  DB_NAME: incidentdesk
+  DB_USER: incidentdesk

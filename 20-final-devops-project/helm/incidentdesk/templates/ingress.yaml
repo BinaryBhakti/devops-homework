@@ -1,0 +1,28 @@
+{{- if .Values.ingress.enabled }}
+{{- $name := include "incidentdesk.fullname" . }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "incidentdesk.labels" . | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    - hosts: [{{ .Values.ingress.host | quote }}]
+      secretName: {{ .Values.ingress.tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          # /api straight to the backend Service on ITS port (the course chart pointed at :8080,
+          # which the backend Service does not expose)
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: {{ $name }}-backend, port: { name: http } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: {{ $name }}-frontend, port: { name: http } } }
+{{- end }}

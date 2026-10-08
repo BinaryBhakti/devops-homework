@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: incidentdesk
+  namespace: incidentdesk
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: incidentdesk.local
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: incidentdesk-backend, port: { name: http } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: incidentdesk-frontend, port: { name: http } } }

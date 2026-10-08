@@ -1,0 +1,27 @@
+# Local Minikube. Small, single replica, a throwaway database password.
+backend:
+  replicas: 1
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { cpu: 300m, memory: 256Mi }
+  image:
+    tag: "latest"              # updated by the CI "gitops" job on every main build
+frontend:
+  replicas: 1
+  image:
+    tag: "latest"              # updated by the CI "gitops" job on every main build
+config:
+  APP_ENV: dev
+  LOG_LEVEL: debug
+postgres:
+  # DEV ONLY: a local, throwaway credential for a database that only exists inside Minikube.
+  # It protects nothing and is deliberately obvious. Real environments use existingSecret.
+  password: local-dev-only
+hpa:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 3
+pdb:
+  enabled: false
+ingress:
+  host: incidentdesk.local
