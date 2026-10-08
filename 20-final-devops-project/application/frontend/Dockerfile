@@ -17,7 +17,13 @@ LABEL org.opencontainers.image.source="https://github.com/BinaryBhakti/devops-ho
 # OpenSSL, c-ares) in it and the security gate blocked the build. Upgrade the OS packages, and
 # remove curl altogether — nginx doesn't need it (the healthcheck uses busybox wget).
 USER root
-RUN apk upgrade --no-cache && apk del --no-cache curl
+# worker_processes auto = one worker per CPU the NODE has, not per CPU the container may use.
+# On an 8-CPU node that started 8 workers inside a 64Mi limit and the kernel OOM-killed nginx
+# (exit 137) — it passed in CI only because the kind runner has fewer CPUs. Pin it to match the
+# 200m CPU limit.
+RUN apk upgrade --no-cache && apk del --no-cache curl \
+ && sed -i 's/^worker_processes .*/worker_processes  2;/' /etc/nginx/nginx.conf \
+ && grep -q '^worker_processes  2;' /etc/nginx/nginx.conf
 ENV BACKEND_URL=http://backend:8000 \
     NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
 COPY templates/default.conf.template /etc/nginx/templates/default.conf.template

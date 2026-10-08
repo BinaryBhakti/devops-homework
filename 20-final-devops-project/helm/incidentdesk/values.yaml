@@ -24,8 +24,8 @@ frontend:
   replicas: 2
   port: 8080
   resources:
-    requests: { cpu: 20m, memory: 32Mi }
-    limits: { cpu: 200m, memory: 64Mi }
+    requests: { cpu: 20m, memory: 48Mi }
+    limits: { cpu: 200m, memory: 96Mi }    # 2 nginx workers + headroom (64Mi was OOMKilled with 8)
 
 # Non-secret configuration -> ConfigMap -> env
 config:
