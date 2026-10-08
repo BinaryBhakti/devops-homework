@@ -1,0 +1,51 @@
+# IncidentDesk — the whole stack on one machine:  docker compose up --build
+#   UI   http://localhost:3000        API  http://localhost:8000/docs
+# Ports are overridable when 3000/8000 are taken:  FRONTEND_PORT=3080 docker compose up --build
+# The CPU caps keep a laptop (and anything else running on it, like Minikube) responsive.
+name: incidentdesk
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: incidentdesk
+      POSTGRES_USER: incidentdesk
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-dev-only}   # override via .env for anything shared
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U incidentdesk -d incidentdesk"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    cpus: 1
+    mem_limit: 256m
+
+  backend:
+    build:
+      context: ../application/backend
+    image: incidentdesk-backend:local
+    environment:
+      DATABASE_URL: postgresql+psycopg://incidentdesk:${POSTGRES_PASSWORD:-local-dev-only}@postgres:5432/incidentdesk
+    depends_on:
+      postgres:
+        condition: service_healthy      # wait for a READY database, not just a started container
+    ports: ["${BACKEND_PORT:-8000}:8000"]
+    cpus: 1
+    mem_limit: 256m
+
+  frontend:
+    build:
+      context: ../application/frontend
+    image: incidentdesk-frontend:local
+    environment:
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports: ["${FRONTEND_PORT:-3000}:8080"]
+    cpus: 1
+    mem_limit: 64m
+
+volumes:
+  pgdata:

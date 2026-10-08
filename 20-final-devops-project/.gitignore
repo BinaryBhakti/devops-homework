@@ -1,0 +1,17 @@
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+reports/
+.venv/
+.env
+# node
+node_modules/
+dist/
+# terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
