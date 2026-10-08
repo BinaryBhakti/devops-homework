@@ -1,7 +1,8 @@
 # DevOps Homework
 
-Completed homework for the **DevOps Heroes** sessions — Linux, Shell Scripting, Networking,
-Git, Docker, and Kubernetes.
+Completed homework for the **DevOps Heroes** sessions: Linux, Shell Scripting, Networking,
+Git, Docker, Kubernetes, Helm, CI/CD and DevSecOps, Terraform, Monitoring and GitOps, and a
+final end-to-end project.
 
 Course repository: <https://github.com/Nency-Ravaliya/devops-heros>
 
@@ -11,10 +12,14 @@ Course repository: <https://github.com/Nency-Ravaliya/devops-heros>
 > Where something failed, broke, or behaved differently than expected, that is written down
 > too, along with the fix.
 >
-> The Kubernetes screenshots (Homeworks 8-11) are **renders of those transcripts** rather than
+> Terminal screenshots (Homeworks 8–20) are **renders of those transcripts** rather than
 > captures of a live terminal — those labs ran non-interactively, so there was no window to
-> photograph. Each image names its source transcript in the title bar. The Docker screenshots
-> (Homeworks 5-7) are real browser captures.
+> photograph. Each image names its source transcript in the title bar. Every **UI** screenshot
+> is a real browser capture: the Docker apps (Homeworks 5–7), the GitHub Actions runs
+> (15, 16, 20), and Grafana, Prometheus, Alertmanager, Jaeger and Argo CD (19, 20).
+>
+> Cloud labs use **LocalStack** instead of AWS. Where the emulator behaves differently from AWS,
+> or the 8 GB laptop running all of this ran out of resources, the write-ups say so.
 
 ---
 
@@ -32,7 +37,31 @@ Course repository: <https://github.com/Nency-Ravaliya/devops-heros>
 | 8 | **[Kubernetes Fundamentals](08-k8s-fundamentals)** | Minikube install, a **two-node** cluster lifecycle, control-plane vs worker architecture |
 | 9 | **[K8s Core Objects](09-k8s-core-objects)** | pods, 12 lifecycle states, ReplicaSet/StatefulSet/DaemonSet, rolling updates, blue-green, canary, recreate |
 | 10 | **[K8s Services & DNS](10-k8s-services)** | all 5 Service types, services without selectors, CoreDNS and `ndots:5`, pod identity |
-| 11 | **[Ingress, ConfigMaps & Secrets](11-ingress-configmaps-secrets)** | config decoupling, base64 gotchas, NGINX Ingress, path/host routing, TLS termination |
+| 11 | **[Ingress, ConfigMaps & Secrets](11-ingress-configmaps-secrets)** | config decoupling, base64 gotchas, NGINX Ingress, path/host routing, TLS termination, Ingress vs controller, a real Postgres troubleshooting case |
+| 12 | **[Storage, HPA & Probes](12-storage-hpa-probes)** | every volume type, HPA under real load, the mini-project, and its multi-node storage bug |
+| 13 | **[Kubernetes Troubleshooting](13-k8s-troubleshooting)** | every kubectl troubleshooting command, 10 broken scenarios fixed, and a real control-plane starvation incident |
+| 14 | **[Helm](14-helm)** | every Helm command, install/upgrade/rollback, a failed upgrade that leaked config into healthy pods, the Notes mini-project |
+| 15 | **[CI/CD & GitHub Actions](15-cicd-github-actions)** | Flask app, tests, matrix, artifacts, GHCR push, deploy to kind; real GitHub runs |
+| 16 | **[DevSecOps](16-devsecops)** | SAST, SCA, secret and image scanning, a security gate shown **blocking** on GitHub |
+| 17 | **[Terraform & IaC](17-terraform-iac)** | S3 on LocalStack, the full Terraform workflow, and IAM/EC2/S3/VPC/DynamoDB/RDS research |
+| 18 | **[Cloud & Terraform](18-cloud-terraform)** | VPC, subnet, SG, EC2 and S3 with dependencies, state, drift and an architecture diagram |
+| 19 | **[Monitoring, Observability & GitOps](19-monitoring-observability-gitops)** | Prometheus, Alertmanager, Grafana, Loki, Jaeger through a live incident; Argo CD GitOps |
+| 20 | **[Final DevOps Project](20-final-devops-project)** | IncidentDesk: app → CI → security gate → GHCR → GitOps → Argo CD → Kubernetes → monitoring, with Terraform |
+
+### Course session ↔ homework
+
+| Course session | Homework | | Course session | Homework |
+|---|---|---|---|---|
+| 1 & 2 Linux | 1 | | 12 Ingress, ConfigMaps & Secrets | 11 |
+| 3 Shell scripting | 2 | | 13 Storage, HPA & Probes | 12 |
+| 4 Networking | 3 | | 14 Kubernetes Troubleshooting | 13 |
+| 5 Git & GitHub | 4 | | 15 Helm | 14 |
+| 6 Docker fundamentals | 5 | | 16 CI/CD & GitHub Actions | 15 |
+| 7 Docker images | 6 | | 17 CI/CD & DevSecOps | 16 |
+| 8 Docker networking | 7 | | 18 Terraform & IaC | 17 |
+| 9 Kubernetes fundamentals | 8 | | 19 Cloud & Terraform | 18 |
+| 10 Pods, ReplicaSets & Deployments | 9 | | 20 Monitoring, Observability & GitOps | 19 |
+| 11 Kubernetes Services | 10 | | 21 Final project | 20 |
 
 ---
 
@@ -225,10 +254,22 @@ devops-homework/
 │   ├── README.md
 │   ├── manifests/                01-clusterip .. 06-no-selector
 │   └── outputs/
-└── 11-ingress-configmaps-secrets/
-    ├── README.md
-    ├── manifests/                configmap, secret, ingress, full-demo
-    └── outputs/
+├── 11-ingress-configmaps-secrets/
+│   ├── README.md
+│   ├── manifests/                configmap, secret, ingress, full-demo
+│   ├── ingress-vs-ingress-controller/   troubleshooting/
+│   └── outputs/
+├── 12-storage-hpa-probes/        volumes, HPA, mini-project (+ storage fix)
+├── 13-k8s-troubleshooting/       commands/, issues/01..10, mini-project/
+├── 14-helm/                      demo-app, rollback-demo(-fixed), mini-project
+├── 15-cicd-github-actions/       app + tests + Dockerfile + k8s  → .github/workflows/hw15-cicd.yml
+├── 16-devsecops/                 app + security configs + k8s    → .github/workflows/hw16-devsecops.yml
+├── 17-terraform-iac/             terraform-s3-demo/, aws-services/01..05
+├── 18-cloud-terraform/           terraform/, architecture.svg
+├── 19-monitoring-observability-gitops/   01-monitoring, 02-observability, 03-gitops
+└── 20-final-devops-project/      application, docker, kubernetes, helm, terraform, security,
+                                  monitoring, gitops, troubleshooting → .github/workflows/hw20-final.yml
+(branch gitops-config)            what Argo CD deploys (Homeworks 19 and 20)
 ```
 
 ---
@@ -242,9 +283,15 @@ devops-homework/
 | Linux lab | Ubuntu 24.04.4 LTS with systemd as PID 1 |
 | Git | 2.50.1 |
 | Browser (screenshots) | Google Chrome, headless |
-| Minikube | v1.39.0, docker driver, **2 nodes** |
+| Minikube | v1.39.0, docker driver, **2 nodes** (worker stopped from Homework 13 on, to fit the laptop) |
 | Kubernetes | server v1.37.0, client v1.36.1, containerd 2.3.4 |
 | Ingress controller | ingress-nginx v1.15.1 (nginx 1.27.1) |
+| Helm | v4.3.0 |
+| Terraform / LocalStack | 1.16.5 / LocalStack 4.14.0 community (the last free image) instead of AWS |
+| GitOps | Argo CD v3.5.4 |
+| Monitoring | Prometheus 3, Grafana 12–13, Loki, Alloy, Jaeger |
+| Security tools | Semgrep, Bandit, pip-audit, npm audit, Trivy 0.75, gitleaks 8.30 |
+| CI | GitHub Actions on `ubuntu-latest`, images in GHCR |
 
 Where the macOS host behaves differently from Linux — most notably `--network host` — the
 difference is documented in place rather than glossed over.
