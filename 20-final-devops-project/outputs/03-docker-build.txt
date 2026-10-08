@@ -1,0 +1,34 @@
+########## DOCKER BUILD — both images, multi-stage, non-root ##########
+
+$ docker build -q -t incidentdesk-backend:local --build-arg GIT_SHA=local backend
+sha256:371490f497d24a3c4b8d133d8f6a381fb02321e4776e80ae2e28326337c1c4be
+
+$ docker build -q -t incidentdesk-frontend:local --build-arg GIT_SHA=local frontend
+sha256:f692fbc954802130677ca1d52f6631a18e853ad38efef14d86768fe7604b7d8b
+
+$ docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | grep -E "REPOSITORY|incidentdesk"
+REPOSITORY                    TAG           SIZE
+incidentdesk-frontend         local         81.9MB
+incidentdesk-backend          local         339MB
+
+# non-root: the user each image runs as
+$ docker image inspect incidentdesk-backend:local --format 'backend  user={{.Config.User}}  cmd={{.Config.Cmd}}'
+backend  user=10001  cmd=[sh -c alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers]
+
+$ docker image inspect incidentdesk-frontend:local --format 'frontend user={{.Config.User}}  ports={{.Config.ExposedPorts}}'
+frontend user=101  ports=map[8080/tcp:{}]
+
+$ docker run --rm --cpus=1 --entrypoint id incidentdesk-backend:local
+uid=10001(appuser) gid=10001(appuser) groups=10001(appuser)
+
+$ docker run --rm --cpus=1 --entrypoint id incidentdesk-frontend:local
+uid=101(nginx) gid=101(nginx) groups=101(nginx),101(nginx)
+
+# the build stages do not ship: no node/npm in the frontend runtime, no compiler or wheel cache in the backend
+$ docker run --rm --cpus=1 --entrypoint sh incidentdesk-frontend:local -c "command -v node npm || echo no node/npm in the runtime image"
+no node/npm in the runtime image
+
+$ docker run --rm --cpus=1 --entrypoint sh incidentdesk-backend:local -c "ls /wheels 2>&1; command -v gcc || echo no compiler"
+ls: cannot access '/wheels': No such file or directory
+no compiler
+

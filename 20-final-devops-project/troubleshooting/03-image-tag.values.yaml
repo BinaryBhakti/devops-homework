@@ -1,0 +1,4 @@
+# Broken variant 3: a release pinned a backend image tag by hand.
+backend:
+  image:
+    tag: "sha-1a2b3c4"

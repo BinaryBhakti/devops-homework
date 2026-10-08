@@ -1,0 +1,103 @@
+########## TERRAFORM (cluster side) — namespaces + guard-rails on the local Minikube cluster ##########
+
+$ kubectl config current-context
+minikube
+
+$ terraform init -input=false -no-color | grep -E "Installing|Installed|successfully"
+- Installing hashicorp/kubernetes v2.38.0...
+- Installed hashicorp/kubernetes v2.38.0 (signed by HashiCorp)
+Terraform has been successfully initialized!
+
+$ terraform validate -no-color
+Success! The configuration is valid.
+
+
+$ terraform plan -input=false -no-color | grep -E "^  # |Plan:"
+  # kubernetes_limit_range_v1.app will be created
+  # kubernetes_namespace_v1.ns["argocd"] will be created
+  # kubernetes_namespace_v1.ns["incidentdesk"] will be created
+  # kubernetes_namespace_v1.ns["monitoring"] will be created
+  # kubernetes_resource_quota_v1.app will be created
+Plan: 5 to add, 0 to change, 0 to destroy.
+
+# the argocd namespace already exists (created by hand in Homework 19) — adopt it into state instead of failing on "already exists"
+$ terraform import -no-color 'kubernetes_namespace_v1.ns["argocd"]' argocd | grep -E 'Import|Imported'
+kubernetes_namespace_v1.ns["argocd"]: Importing from ID "argocd"...
+kubernetes_namespace_v1.ns["argocd"]: Import prepared!
+Import successful!
+
+$ terraform apply -input=false -no-color -auto-approve | grep -E "Creation complete|Modifications complete|Apply complete"
+kubernetes_namespace_v1.ns["monitoring"]: Creation complete after 0s [id=monitoring]
+kubernetes_namespace_v1.ns["argocd"]: Modifications complete after 0s [id=argocd]
+kubernetes_namespace_v1.ns["incidentdesk"]: Creation complete after 0s [id=incidentdesk]
+kubernetes_limit_range_v1.app: Creation complete after 0s [id=incidentdesk/incidentdesk-defaults]
+kubernetes_resource_quota_v1.app: Creation complete after 1s [id=incidentdesk/incidentdesk-quota]
+Apply complete! Resources: 4 added, 1 changed, 0 destroyed.
+
+$ kubectl get ns incidentdesk monitoring argocd --show-labels
+NAME           STATUS   AGE     LABELS
+incidentdesk   Active   2s      app.kubernetes.io/managed-by=terraform,kubernetes.io/metadata.name=incidentdesk,pod-security.kubernetes.io/enforce=baseline,purpose=application
+monitoring     Active   2s      app.kubernetes.io/managed-by=terraform,kubernetes.io/metadata.name=monitoring,pod-security.kubernetes.io/enforce=privileged,purpose=prometheus-grafana
+argocd         Active   7h24m   app.kubernetes.io/managed-by=terraform,kubernetes.io/metadata.name=argocd,pod-security.kubernetes.io/enforce=baseline,purpose=gitops
+
+$ kubectl -n incidentdesk get resourcequota,limitrange
+NAME                               REQUEST                                                                                     LIMIT                  AGE
+resourcequota/incidentdesk-quota   persistentvolumeclaims: 0/4, pods: 0/20, requests.cpu: 0/1500m, requests.memory: 0/1536Mi   limits.memory: 0/3Gi   1s
+
+NAME                               CREATED AT
+limitrange/incidentdesk-defaults   2026-10-08T05:51:37Z
+
+$ kubectl -n incidentdesk describe resourcequota | sed -n "/Resource/,\$p"
+Resource                Used  Hard
+--------                ----  ----
+limits.memory           0     3Gi
+persistentvolumeclaims  0     4
+pods                    0     20
+requests.cpu            0     1500m
+requests.memory         0     1536Mi
+
+$ terraform plan -input=false -no-color -detailed-exitcode >/dev/null; echo "plan exit code: $? (0 = no changes)"
+plan exit code: 2 (0 = no changes)
+
+# the second plan was NOT empty — find out why
+$ git -C .. stash list >/dev/null; terraform plan -input=false -no-color 2>&1 | grep -E "^\s+[~+-] |# |Plan:" | head -8 || true
+
+# ROOT CAUSE: LimitRange set max.cpu but no default.cpu; the API server then defaults default.cpu to max.cpu, and Terraform kept trying to remove it.
+# FIX: state default.cpu = max explicitly (what the API server does anyway), then re-apply and re-check
+$ terraform fmt -check && terraform validate -no-color
+Success! The configuration is valid.
+
+
+$ terraform apply -input=false -no-color -auto-approve | grep -E "complete"
+Apply complete! Resources: 0 added, 0 changed, 0 destroyed.
+
+$ terraform plan -input=false -no-color -detailed-exitcode >/dev/null; echo "plan exit code: $? (0 = no changes)"
+plan exit code: 0 (0 = no changes)
+
+# CORRECTION: the plan above ran after the edit, so it showed nothing. Re-create the drift to capture it: put the original block back, plan, then restore the fix
+$ grep -A3 "default = {" main.tf
+      default = {
+        memory = "256Mi"
+      }
+      max = {
+
+$ terraform plan -input=false -no-color 2>&1 | grep -E "^\s+[~+-] |# |Plan:|default" | head -8
+kubernetes_limit_range_v1.app: Refreshing state... [id=incidentdesk/incidentdesk-defaults]
+  ~ update in-place
+  # kubernetes_limit_range_v1.app will be updated in-place
+  ~ resource "kubernetes_limit_range_v1" "app" {
+        id = "incidentdesk/incidentdesk-defaults"
+      ~ spec {
+          ~ limit {
+              ~ default                 = {
+
+$ grep -A4 "default = {" main.tf
+      default = {
+        cpu    = "1"
+        memory = "256Mi"
+      }
+      max = {
+
+$ terraform plan -input=false -no-color -detailed-exitcode >/dev/null; echo "plan exit code: $? (0 = no changes)"
+plan exit code: 0 (0 = no changes)
+

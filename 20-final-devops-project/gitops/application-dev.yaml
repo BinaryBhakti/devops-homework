@@ -1,0 +1,42 @@
+# Argo CD Application: "the dev environment is whatever the Helm chart under incidentdesk/ on the
+# gitops-config branch renders with values-dev.yaml". CI publishes the chart and the image tag
+# there after a green pipeline (job "gitops"). Applied ONCE by an admin:
+#   kubectl apply -f gitops/application-dev.yaml
+# After that nobody runs kubectl/helm against the app namespace — every change is a Git commit.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: incidentdesk-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io   # deleting the Application also deletes what it deployed
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/BinaryBhakti/devops-homework.git
+    targetRevision: gitops-config   # small environment branch; see README (Homework 19 explains why)
+    path: incidentdesk
+    helm:
+      releaseName: incidentdesk
+      valueFiles:
+        - values-dev.yaml        # its image tags are bumped by the CI "gitops" job
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: incidentdesk
+  syncPolicy:
+    automated:
+      prune: true       # removed from Git -> removed from the cluster
+      selfHeal: true    # changed in the cluster by hand -> changed back
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff: { duration: 10s, factor: 2, maxDuration: 3m }
+  # The HPA owns backend replicas; don't fight it (the chart omits spec.replicas when the HPA is
+  # enabled, this is belt and braces for anyone who turns it off and on again).
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: incidentdesk-backend
+      jsonPointers: [/spec/replicas]

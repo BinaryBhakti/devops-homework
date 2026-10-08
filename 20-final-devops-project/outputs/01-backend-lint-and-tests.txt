@@ -1,0 +1,58 @@
+########## BUILD & TEST — backend lint + pytest against a real (separate) PostgreSQL ##########
+
+# a throwaway Postgres 16 for tests only — never the application database
+$ docker ps --filter name=hw20-pg --format "{{.Names}}  {{.Image}}  {{.Status}}"
+hw20-pg  postgres:16-alpine  Up 35 minutes
+
+$ docker run --rm --cpus=1 --memory=512m --network hw20-test -v "$PWD":/src -w /src -e TEST_DATABASE_URL=postgresql+psycopg://test:test@hw20-pg:5432/incidentdesk_test hw20-backend-test:local ruff check .
+All checks passed!
+
+$ docker run --rm --cpus=1 --memory=512m --network hw20-test -v "$PWD":/src -w /src -e TEST_DATABASE_URL=postgresql+psycopg://test:test@hw20-pg:5432/incidentdesk_test hw20-backend-test:local ruff format --check .
+10 files already formatted
+
+# the schema is created by running the Alembic migration (tests/conftest.py), so the migration is tested too
+$ docker run --rm --cpus=1 --memory=512m --network hw20-test -v "$PWD":/src -w /src -e TEST_DATABASE_URL=postgresql+psycopg://test:test@hw20-pg:5432/incidentdesk_test hw20-backend-test:local pytest -v -p no:cacheprovider --cov=app --cov-report=term-missing
+============================= test session starts ==============================
+platform linux -- Python 3.12.15, pytest-9.1.1, pluggy-1.6.0 -- /usr/local/bin/python3.12
+rootdir: /src
+configfile: pytest.ini
+testpaths: tests
+plugins: platformdirs-4.12.3, cov-7.1.0, anyio-4.15.1
+collecting ... collected 12 items
+
+tests/test_api.py::test_root_reports_service_name PASSED                 [  8%]
+tests/test_api.py::test_health_is_up_without_touching_db PASSED          [ 16%]
+tests/test_api.py::test_ready_checks_the_database PASSED                 [ 25%]
+tests/test_api.py::test_create_and_get_incident PASSED                   [ 33%]
+tests/test_api.py::test_list_newest_first_and_filter_by_status PASSED    [ 41%]
+tests/test_api.py::test_resolving_sets_resolved_at_and_reopening_clears_it PASSED [ 50%]
+tests/test_api.py::test_partial_update_keeps_other_fields PASSED         [ 58%]
+tests/test_api.py::test_delete_incident PASSED                           [ 66%]
+tests/test_api.py::test_unknown_incident_is_404_for_get_put_delete PASSED [ 75%]
+tests/test_api.py::test_validation_rejects_bad_severity_and_short_title PASSED [ 83%]
+tests/test_api.py::test_stats_counts_by_status_and_open_sev1 PASSED      [ 91%]
+tests/test_api.py::test_metrics_endpoint_exposes_red_and_business_metrics PASSED [100%]
+
+================================ tests coverage ================================
+_______________ coverage: platform linux, python 3.12.15-final-0 _______________
+
+Name              Stmts   Miss  Cover   Missing
+-----------------------------------------------
+app/__init__.py       0      0   100%
+app/config.py         7      0   100%
+app/db.py            12      0   100%
+app/main.py          79      3    96%   51-53
+app/models.py        17      0   100%
+app/schemas.py       30      0   100%
+-----------------------------------------------
+TOTAL               145      3    98%
+============================== 12 passed in 2.18s ==============================
+
+# the safety catch: without TEST_DATABASE_URL the suite refuses to start rather than touch a real database
+$ docker run --rm --cpus=1 --memory=512m -v "$PWD":/src -w /src hw20-backend-test:local pytest -q -p no:cacheprovider; echo "exit code: $?"
+ImportError while loading conftest '/src/tests/conftest.py'.
+tests/conftest.py:12: in <module>
+    pytest.exit(
+E   _pytest.outcomes.Exit: TEST_DATABASE_URL is not set — refusing to run tests against the application database
+exit code: 4
+

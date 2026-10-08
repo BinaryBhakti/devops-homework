@@ -1,0 +1,189 @@
+########## TERRAFORM (cloud side) — LocalStack 4.14.0: network, security, backup storage, IAM, state lock ##########
+
+$ curl -s localhost:4566/_localstack/health | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[\"edition\"], d[\"version\"], {k:v for k,v in d[\"services\"].items() if v!=\"disabled\"})"
+community 4.14.0 {'dynamodb': 'available', 'dynamodbstreams': 'available', 'ec2': 'available', 'iam': 'available', 'kinesis': 'available', 's3': 'available', 'sts': 'available'}
+
+$ terraform version | head -1
+Terraform v1.16.5
+
+$ terraform init -input=false -no-color | grep -E "Initializing|Installing|Installed|successfully"
+Initializing the backend...
+Initializing provider plugins...
+- Installing hashicorp/random v3.9.1...
+- Installed hashicorp/random v3.9.1 (signed by HashiCorp)
+- Installing hashicorp/aws v6.68.0...
+- Installed hashicorp/aws v6.68.0 (signed by HashiCorp)
+Terraform has been successfully initialized!
+
+$ terraform fmt -check -recursive && echo "fmt: clean"
+fmt: clean
+
+$ terraform validate -no-color
+Success! The configuration is valid.
+
+
+$ terraform plan -input=false -no-color -out=tfplan | grep -E "^  # |Plan:"
+  # data.aws_iam_policy_document.backup_access will be read during apply
+  # (config refers to values not yet known)
+  # aws_dynamodb_table.tf_lock will be created
+  # aws_eip.nat will be created
+  # aws_iam_policy.backup will be created
+  # aws_iam_role.backup will be created
+  # aws_iam_role_policy_attachment.backup will be created
+  # aws_internet_gateway.main will be created
+  # aws_nat_gateway.main will be created
+  # aws_route_table.private will be created
+  # aws_route_table.public will be created
+  # aws_route_table_association.private[0] will be created
+  # aws_route_table_association.private[1] will be created
+  # aws_route_table_association.public[0] will be created
+  # aws_route_table_association.public[1] will be created
+  # aws_s3_bucket.backups will be created
+  # aws_s3_bucket_lifecycle_configuration.backups will be created
+  # aws_s3_bucket_public_access_block.backups will be created
+  # aws_s3_bucket_server_side_encryption_configuration.backups will be created
+  # aws_s3_bucket_versioning.backups will be created
+  # aws_security_group.db will be created
+  # aws_security_group.web will be created
+  # aws_subnet.private[0] will be created
+  # aws_subnet.private[1] will be created
+  # aws_subnet.public[0] will be created
+  # aws_subnet.public[1] will be created
+  # aws_vpc.main will be created
+  # aws_vpc_security_group_egress_rule.web_to_vpc will be created
+  # aws_vpc_security_group_ingress_rule.db_from_web will be created
+  # aws_vpc_security_group_ingress_rule.web_http will be created
+  # aws_vpc_security_group_ingress_rule.web_https will be created
+  # random_id.suffix will be created
+Plan: 30 to add, 0 to change, 0 to destroy.
+
+$ terraform apply -input=false -no-color tfplan | grep -E "Creation complete|Apply complete"
+random_id.suffix: Creation complete after 0s [id=Giqd]
+aws_s3_bucket.backups: Creation complete after 10s [id=incidentdesk-dev-db-backups-1a2a9d]
+aws_s3_bucket_server_side_encryption_configuration.backups: Creation complete after 1s [id=incidentdesk-dev-db-backups-1a2a9d]
+aws_s3_bucket_public_access_block.backups: Creation complete after 1s [id=incidentdesk-dev-db-backups-1a2a9d]
+aws_s3_bucket_versioning.backups: Creation complete after 4s [id=incidentdesk-dev-db-backups-1a2a9d]
+aws_iam_policy.backup: Creation complete after 5s [id=arn:aws:iam::000000000000:policy/incidentdesk-dev-db-backup]
+aws_iam_role.backup: Creation complete after 15s [id=incidentdesk-dev-db-backup]
+aws_iam_role_policy_attachment.backup: Creation complete after 5s [id=incidentdesk-dev-db-backup/arn:aws:iam::000000000000:policy/incidentdesk-dev-db-backup]
+aws_vpc.main: Creation complete after 23s [id=vpc-b9c63015f82528d69]
+aws_subnet.public[0]: Creation complete after 0s [id=subnet-5d8dcca763663f2f9]
+aws_subnet.private[0]: Creation complete after 0s [id=subnet-8c3bc6acf71f5d5e0]
+aws_internet_gateway.main: Creation complete after 0s [id=igw-a39207a92d8540647]
+aws_subnet.private[1]: Creation complete after 0s [id=subnet-f8b03f5d6e91b451b]
+aws_subnet.public[1]: Creation complete after 0s [id=subnet-0f1c8f85e56cf74a0]
+aws_eip.nat: Creation complete after 0s [id=eipalloc-ea2c2ed4dacef3245]
+aws_nat_gateway.main: Creation complete after 1s [id=nat-80db7a7b910d65b61]
+aws_security_group.web: Creation complete after 1s [id=sg-0ca9bcf13ea9e1f7c]
+aws_security_group.db: Creation complete after 1s [id=sg-05dcdea839dd52e68]
+aws_route_table.public: Creation complete after 1s [id=rtb-f335360b51ced98ac]
+aws_vpc_security_group_ingress_rule.web_https: Creation complete after 0s [id=sgr-3b0155dbb106c0087]
+aws_vpc_security_group_ingress_rule.web_http: Creation complete after 0s [id=sgr-190edac056d82836d]
+aws_vpc_security_group_ingress_rule.db_from_web: Creation complete after 0s [id=sgr-55d300646b467d007]
+aws_vpc_security_group_egress_rule.web_to_vpc: Creation complete after 0s [id=sgr-fca62219894f68abb]
+aws_route_table_association.public[0]: Creation complete after 0s [id=rtbassoc-82342982f85bfe4a9]
+aws_route_table_association.public[1]: Creation complete after 0s [id=rtbassoc-b98c1b1fac02b7efa]
+aws_route_table.private: Creation complete after 0s [id=rtb-98638ed231077c879]
+aws_route_table_association.private[1]: Creation complete after 0s [id=rtbassoc-fcc4a5b787624b122]
+aws_route_table_association.private[0]: Creation complete after 1s [id=rtbassoc-57d804e796dd2cede]
+aws_dynamodb_table.tf_lock: Creation complete after 33s [id=incidentdesk-dev-tf-lock]
+aws_s3_bucket_lifecycle_configuration.backups: Creation complete after 57s [id=incidentdesk-dev-db-backups-1a2a9d]
+Apply complete! Resources: 30 added, 0 changed, 0 destroyed.
+
+$ terraform output -no-color
+backup_bucket = "incidentdesk-dev-db-backups-1a2a9d"
+backup_role_arn = "arn:aws:iam::000000000000:role/incidentdesk-dev-db-backup"
+nat_gateway_id = "nat-80db7a7b910d65b61"
+private_subnet_ids = [
+  "subnet-8c3bc6acf71f5d5e0",
+  "subnet-f8b03f5d6e91b451b",
+]
+public_subnet_ids = [
+  "subnet-5d8dcca763663f2f9",
+  "subnet-0f1c8f85e56cf74a0",
+]
+security_group_ids = {
+  "db" = "sg-05dcdea839dd52e68"
+  "web" = "sg-0ca9bcf13ea9e1f7c"
+}
+tf_lock_table = "incidentdesk-dev-tf-lock"
+vpc_id = "vpc-b9c63015f82528d69"
+
+$ terraform state list
+data.aws_iam_policy_document.backup_access
+data.aws_iam_policy_document.backup_assume
+aws_dynamodb_table.tf_lock
+aws_eip.nat
+aws_iam_policy.backup
+aws_iam_role.backup
+aws_iam_role_policy_attachment.backup
+aws_internet_gateway.main
+aws_nat_gateway.main
+aws_route_table.private
+aws_route_table.public
+aws_route_table_association.private[0]
+aws_route_table_association.private[1]
+aws_route_table_association.public[0]
+aws_route_table_association.public[1]
+aws_s3_bucket.backups
+aws_s3_bucket_lifecycle_configuration.backups
+aws_s3_bucket_public_access_block.backups
+aws_s3_bucket_server_side_encryption_configuration.backups
+aws_s3_bucket_versioning.backups
+aws_security_group.db
+aws_security_group.web
+aws_subnet.private[0]
+aws_subnet.private[1]
+aws_subnet.public[0]
+aws_subnet.public[1]
+aws_vpc.main
+aws_vpc_security_group_egress_rule.web_to_vpc
+aws_vpc_security_group_ingress_rule.db_from_web
+aws_vpc_security_group_ingress_rule.web_http
+aws_vpc_security_group_ingress_rule.web_https
+random_id.suffix
+
+# verify through the AWS API, not through Terraform
+$ awslocal ec2 describe-vpcs --filters Name=tag:Project,Values=incidentdesk --query 'Vpcs[].[VpcId,CidrBlock,Tags[?Key==`Name`]|[0].Value]' --output text
+vpc-b9c63015f82528d69	10.20.0.0/16	incidentdesk-dev-vpc
+
+$ awslocal ec2 describe-subnets --filters Name=tag:Project,Values=incidentdesk --query 'Subnets[].[SubnetId,CidrBlock,AvailabilityZone,MapPublicIpOnLaunch]' --output text
+subnet-5d8dcca763663f2f9	10.20.0.0/24	us-east-1a	False
+subnet-8c3bc6acf71f5d5e0	10.20.10.0/24	us-east-1a	False
+subnet-f8b03f5d6e91b451b	10.20.11.0/24	us-east-1b	False
+subnet-0f1c8f85e56cf74a0	10.20.1.0/24	us-east-1b	False
+
+$ awslocal ec2 describe-security-groups --filters Name=tag:Project,Values=incidentdesk --query 'SecurityGroups[].[GroupName,length(IpPermissions)]' --output text
+incidentdesk-dev-db	1
+incidentdesk-dev-web	2
+
+$ B=$(terraform output -raw backup_bucket 2>/dev/null || terraform output -json | python3 -c 'import json,sys; d=json.load(sys.stdin); print([v["value"] for k,v in d.items() if "bucket" in k][0])'); echo "bucket: $B"; awslocal s3api get-bucket-versioning --bucket $B; awslocal s3api get-bucket-encryption --bucket $B --query 'ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault'
+bucket: incidentdesk-dev-db-backups-1a2a9d
+{
+    "Status": "Enabled"
+}
+{
+    "SSEAlgorithm": "AES256"
+}
+
+$ awslocal dynamodb list-tables --output text; awslocal iam list-roles --query "Roles[?contains(RoleName,'incidentdesk')].RoleName" --output text
+TABLENAMES	incidentdesk-dev-tf-lock
+incidentdesk-dev-db-backup
+
+# idempotence: a second plan must be empty
+$ terraform plan -input=false -no-color -detailed-exitcode >/dev/null; echo "plan exit code: $? (0 = no changes)"
+plan exit code: 2 (0 = no changes)
+
+# the second plan was not empty (exit 2) — what does it want to change?
+$ terraform plan -input=false -no-color 2>&1 | grep -E "^\s+[~+-] |# |Plan:" | head -8
+  ~ update in-place
+  # aws_vpc_security_group_ingress_rule.db_from_web will be updated in-place
+  ~ resource "aws_vpc_security_group_ingress_rule" "db_from_web" {
+      + description                  = "PostgreSQL from the web tier"
+      ~ referenced_security_group_id = "000000000000/sg-0ca9bcf13ea9e1f7c" -> "sg-0ca9bcf13ea9e1f7c"
+        # (8 unchanged attributes hidden)
+Plan: 0 to add, 1 to change, 0 to destroy.
+
+# an EMULATOR artifact, not a config bug: LocalStack returns the referenced security group as "<account>/<sg-id>" and drops the rule description,
+# so the read-back never matches what was written. Real AWS returns the bare sg-id for a same-account reference. The configuration is left correct for
+# real AWS instead of hiding the difference with ignore_changes; every other resource (29 of 30) is stable.

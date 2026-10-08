@@ -1,0 +1,11 @@
+########## CI/CD + MANIFEST VALIDATION — before anything is pushed ##########
+
+# actionlint: workflow syntax, expression types, job graph, and shellcheck over every run: block
+$ docker run --rm --cpus=1 --memory=256m -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.12 -no-color -oneline .github/workflows/hw20-final.yml; echo "actionlint exit code: $?"
+Unable to find image 'rhysd/actionlint:1.7.12' locally
+1.7.12: Pulling from rhysd/actionlint
+docker: failed to do request: Get "https://registry-1.docker.io/v2/rhysd/actionlint/referrers/sha256:82d5a771fd4c4ed0297bdabeebdd09578aad1a9caa2190cb743dcbae25ca83db": net/http: timeout awaiting response headers
+
+Run 'docker run --help' for more information
+actionlint exit code: 125
+

@@ -1,0 +1,91 @@
+########## DOCKER COMPOSE — the whole stack with one command ##########
+
+# port 3000 is taken on this machine by an unrelated dev server, so the UI is published on 3080 (FRONTEND_PORT)
+$ FRONTEND_PORT=3080 docker compose up -d --build --wait --wait-timeout 420 2>&1 | grep -E "Container|Built|Image" | tail -12
+ Container incidentdesk-backend-1 Starting 
+ Container incidentdesk-backend-1 Started 
+ Container incidentdesk-backend-1 Waiting 
+ Container incidentdesk-backend-1 Healthy 
+ Container incidentdesk-frontend-1 Starting 
+ Container incidentdesk-frontend-1 Started 
+ Container incidentdesk-postgres-1 Waiting 
+ Container incidentdesk-backend-1 Waiting 
+ Container incidentdesk-frontend-1 Waiting 
+ Container incidentdesk-backend-1 Healthy 
+ Container incidentdesk-postgres-1 Healthy 
+ Container incidentdesk-frontend-1 Healthy 
+
+$ docker compose ps --format "table {{.Service}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
+SERVICE    IMAGE                         STATUS                        PORTS
+backend    incidentdesk-backend:local    Up About a minute (healthy)   0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp
+frontend   incidentdesk-frontend:local   Up 27 seconds (healthy)       0.0.0.0:3080->8080/tcp, [::]:3080->8080/tcp
+postgres   postgres:16-alpine            Up 2 minutes (healthy)        5432/tcp
+
+# Alembic ran the migration before uvicorn started
+$ docker compose logs backend 2>&1 | grep -E "alembic.runtime|Uvicorn running" | head -4
+backend-1  | INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+backend-1  | INFO  [alembic.runtime.migration] Will assume transactional DDL.
+backend-1  | INFO  [alembic.runtime.migration] Running upgrade  -> 0001_create_incidents, create incidents table
+backend-1  | INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+
+$ curl -s localhost:8000/health; echo; curl -s localhost:8000/ready; echo
+{"status":"UP"}
+{"status":"READY","database":"ok"}
+
+# CRUD through the frontend nginx proxy (localhost:3080/api -> backend:8000) — the same path the browser uses
+$ curl -s -X POST localhost:3080/api/incidents -H 'Content-Type: application/json' -d '{"title":"Checkout returns 502","description":"payments gateway timing out for ~30% of users","service":"payments","severity":"SEV1","assignee":"on-call"}'; echo
+{"title":"Checkout returns 502","description":"payments gateway timing out for ~30% of users","service":"payments","severity":"SEV1","status":"OPEN","assignee":"on-call","id":1,"created_at":"2026-10-07T18:52:34.410820Z","resolved_at":null}
+
+$ for body in '{"title":"Search latency p95 above 2s","description":"started after the 14:02 deploy","service":"search","severity":"SEV2","status":"INVESTIGATING","assignee":"sre-team"}' '{"title":"Nightly backup job failed","description":"S3 upload returned AccessDenied","service":"postgres","severity":"SEV3","assignee":"dba"}' '{"title":"TLS certificate expires in 7 days","service":"ingress","severity":"SEV4","status":"RESOLVED","assignee":"platform"}' '{"title":"Typo incident, please delete","service":"none","severity":"SEV4"}'; do curl -s -o /dev/null -w 'POST -> HTTP %{http_code}\n' -X POST localhost:3080/api/incidents -H 'Content-Type: application/json' -d "$body"; done
+POST -> HTTP 201
+POST -> HTTP 201
+POST -> HTTP 201
+POST -> HTTP 201
+
+$ curl -s -X PUT localhost:3080/api/incidents/3 -H 'Content-Type: application/json' -d '{"status":"INVESTIGATING"}' | python3 -c 'import json,sys;d=json.load(sys.stdin);[print(i["id"],i["severity"],i["status"],i["title"]) for i in (d if isinstance(d,list) else [d])]'
+3 SEV3 INVESTIGATING Nightly backup job failed
+
+$ curl -s -o /dev/null -w 'DELETE /5 -> HTTP %{http_code}\n' -X DELETE localhost:3080/api/incidents/5; curl -s -o /dev/null -w 'GET /5   -> HTTP %{http_code}\n' localhost:3080/api/incidents/5
+DELETE /5 -> HTTP 204
+GET /5   -> HTTP 404
+
+$ curl -s localhost:3080/api/incidents | python3 -c 'import json,sys;d=json.load(sys.stdin);[print(i["id"],i["severity"],i["status"],i["title"]) for i in (d if isinstance(d,list) else [d])]'
+4 SEV4 RESOLVED TLS certificate expires in 7 days
+3 SEV3 INVESTIGATING Nightly backup job failed
+2 SEV2 INVESTIGATING Search latency p95 above 2s
+1 SEV1 OPEN Checkout returns 502
+
+$ curl -s 'localhost:3080/api/incidents?status=INVESTIGATING' | python3 -c 'import json,sys;d=json.load(sys.stdin);[print(i["id"],i["severity"],i["status"],i["title"]) for i in (d if isinstance(d,list) else [d])]'
+3 SEV3 INVESTIGATING Nightly backup job failed
+2 SEV2 INVESTIGATING Search latency p95 above 2s
+
+$ curl -s localhost:3080/api/incidents/stats; echo
+{"total":4,"open":1,"investigating":2,"resolved":1,"sev1_open":1}
+
+$ curl -s -o /dev/null -w 'invalid severity -> HTTP %{http_code}\n' -X POST localhost:3080/api/incidents -H 'Content-Type: application/json' -d '{"title":"bad request","severity":"SEV9"}'
+invalid severity -> HTTP 422
+
+# /metrics — RED metrics from the instrumentator plus the business counter
+$ curl -s localhost:8000/metrics | grep -E "^(http_requests_total|incidents_created_total)" | head -10
+incidents_created_total{severity="SEV1"} 1.0
+incidents_created_total{severity="SEV2"} 1.0
+incidents_created_total{severity="SEV3"} 1.0
+incidents_created_total{severity="SEV4"} 2.0
+http_requests_total{handler="/api/incidents",method="POST",status="2xx"} 5.0
+http_requests_total{handler="/api/incidents/{incident_id}",method="PUT",status="2xx"} 1.0
+http_requests_total{handler="/api/incidents/{incident_id}",method="DELETE",status="2xx"} 1.0
+http_requests_total{handler="/api/incidents/{incident_id}",method="GET",status="4xx"} 1.0
+http_requests_total{handler="/api/incidents",method="GET",status="2xx"} 2.0
+http_requests_total{handler="/api/incidents/stats",method="GET",status="2xx"} 1.0
+
+$ curl -s -o /dev/null -w "frontend / -> HTTP %{http_code}\n" localhost:3080/; curl -s localhost:3080/ | grep -o "<title>.*</title>"
+frontend / -> HTTP 200
+<title>IncidentDesk</title>
+
+$ docker compose exec -T postgres psql -U incidentdesk -d incidentdesk -c "select version_num from alembic_version"
+      version_num      
+-----------------------
+ 0001_create_incidents
+(1 row)
+
+

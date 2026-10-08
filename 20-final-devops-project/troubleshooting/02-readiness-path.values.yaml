@@ -1,0 +1,4 @@
+# Broken variant 2: a probe "tidy-up" renamed the readiness endpoint in the values file.
+backend:
+  probes:
+    readiness: { path: /readyz, periodSeconds: 5, timeoutSeconds: 2, failureThreshold: 2 }

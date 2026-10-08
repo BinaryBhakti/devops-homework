@@ -1,0 +1,401 @@
+########## DEVSECOPS — the same scanners the pipeline runs, run locally first (one at a time) ##########
+
+# SAST 1/2 — Bandit (Python-specific insecure patterns), MEDIUM and above
+$ docker run --rm --cpus=1 --memory=768m -v "$PWD":/src -w /src hw20-backend-test:local bandit -c 20-final-devops-project/security/bandit.yaml -r 20-final-devops-project/application/backend/app -ll
+[main]	INFO	profile include tests: None
+[main]	INFO	profile exclude tests: None
+[main]	INFO	cli include tests: None
+[main]	INFO	cli exclude tests: None
+[main]	INFO	using config: 20-final-devops-project/security/bandit.yaml
+[main]	INFO	running on Python 3.12.15
+Run started:2026-10-07 18:57:12.453509+00:00
+
+Test results:
+	No issues identified.
+
+Code scanned:
+	Total lines of code: 168
+	Total lines skipped (#nosec): 0
+	Total potential issues skipped due to specifically being disabled (e.g., #nosec BXXX): 0
+
+Run metrics:
+	Total issues (by severity):
+		Undefined: 0
+		Low: 0
+		Medium: 0
+		High: 0
+	Total issues (by confidence):
+		Undefined: 0
+		Low: 0
+		Medium: 0
+		High: 0
+Files skipped (0):
+
+# SCA 1/3 — pip-audit: every pinned runtime dependency against the PyPA advisory DB / OSV
+$ docker run --rm --cpus=1 --memory=768m -v "$PWD":/src -w /src hw20-backend-test:local pip-audit -r 20-final-devops-project/application/backend/requirements.txt --strict --progress-spinner off
+No known vulnerabilities found
+
+# SCA 2/3 — npm audit was run during the frontend build: "found 0 vulnerabilities" (outputs/02-frontend-build.txt)
+# SCA 3/3 + IaC — Trivy filesystem scan: lockfiles, Dockerfiles, Helm/K8s/Terraform misconfiguration, stray secrets
+$ trivy --version | head -1
+Version: 0.75.0
+
+$ trivy fs --config 20-final-devops-project/security/trivy.yaml --scanners vuln,secret,misconfig --skip-dirs 20-final-devops-project/outputs --quiet 20-final-devops-project 2>&1 | tail -60
+2026-10-08T00:30:21+05:30	FATAL	Fatal error	flag error: unable to convert flags to options: ignore file not found: security/.trivyignore
+
+# first run of this scan found 9 misconfigurations; each was fixed (Dockerfile USER, read-only root filesystems for nginx/postgres/init containers,
+# explicit postgres securityContext, no auto public IPs, VPC-only egress) except AWS-0132, accepted in .trivyignore with a reason and a review date
+$ trivy fs --config 20-final-devops-project/security/trivy.yaml --ignorefile 20-final-devops-project/security/.trivyignore --scanners vuln,secret,misconfig --skip-dirs 20-final-devops-project/outputs --quiet 20-final-devops-project; echo "trivy fs exit code: $?"
+
+Report Summary
+
+┌────────────────────────────────────────┬────────────┬─────────────────┬─────────┬───────────────────┐
+│                 Target                 │    Type    │ Vulnerabilities │ Secrets │ Misconfigurations │
+├────────────────────────────────────────┼────────────┼─────────────────┼─────────┼───────────────────┤
+│ application/backend/requirements.txt   │    pip     │        0        │    -    │         -         │
+├────────────────────────────────────────┼────────────┼─────────────────┼─────────┼───────────────────┤
+│ application/frontend/package-lock.json │    npm     │        0        │    -    │         -         │
+├────────────────────────────────────────┼────────────┼─────────────────┼─────────┼───────────────────┤
+│ application/backend/Dockerfile         │ dockerfile │        -        │    -    │         0         │
+├────────────────────────────────────────┼────────────┼─────────────────┼─────────┼───────────────────┤
+│ application/frontend/Dockerfile        │ dockerfile │        -        │    -    │         0         │
+├────────────────────────────────────────┼────────────┼─────────────────┼─────────┼───────────────────┤
+│ gitops/application-dev.yaml            │ kubernetes │        -        │    -    │         0         │
+├────────────────────────────────────────┼────────────┼─────────────────┼─────────┼───────────────────┤
+│ kubernetes/00-namespace.yaml           │ kubernetes │        -        │    -    │         0         │
+├────────────────────────────────────────┼────────────┼─────────────────┼─────────┼───────────────────┤
+│ kubernetes/01-configmap.yaml           │ kubernetes │        -        │    -    │         0         │
+├────────────────────────────────────────┼────────────┼─────────────────┼─────────┼───────────────────┤
+│ kubernetes/02-secret.example.yaml      │ kubernetes │        -        │    -    │         0         │
+├────────────────────────────────────────┼────────────┼─────────────────┼─────────┼───────────────────┤
+│ kubernetes/03-postgres.yaml            │ kubernetes │        -        │    -    │         0         │
+├────────────────────────────────────────┼────────────┼─────────────────┼─────────┼───────────────────┤
+│ kubernetes/04-backend.yaml             │ kubernetes │        -        │    -    │         0         │
+├────────────────────────────────────────┼────────────┼─────────────────┼─────────┼───────────────────┤
+│ kubernetes/05-frontend.yaml            │ kubernetes │        -        │    -    │         0         │
+├────────────────────────────────────────┼────────────┼─────────────────┼─────────┼───────────────────┤
+│ kubernetes/06-ingress.yaml             │ kubernetes │        -        │    -    │         0         │
+├────────────────────────────────────────┼────────────┼─────────────────┼─────────┼───────────────────┤
+│ kubernetes/07-hpa.yaml                 │ kubernetes │        -        │    -    │         0         │
+├────────────────────────────────────────┼────────────┼─────────────────┼─────────┼───────────────────┤
+│ terraform                              │ terraform  │        -        │    -    │         0         │
+├────────────────────────────────────────┼────────────┼─────────────────┼─────────┼───────────────────┤
+│ terraform/k8s                          │ terraform  │        -        │    -    │         0         │
+├────────────────────────────────────────┼────────────┼─────────────────┼─────────┼───────────────────┤
+│ terraform/network.tf                   │ terraform  │        -        │    -    │         0         │
+├────────────────────────────────────────┼────────────┼─────────────────┼─────────┼───────────────────┤
+│ terraform/storage.tf                   │ terraform  │        -        │    -    │         0         │
+└────────────────────────────────────────┴────────────┴─────────────────┴─────────┴───────────────────┘
+Legend:
+- '-': Not scanned
+- '0': Clean (no security findings detected)
+
+trivy fs exit code: 0
+
+# IMAGE SCAN — both built images, fail on HIGH/CRITICAL with a fix available
+$ trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 incidentdesk-backend:local; echo "backend image exit code: $?"
+
+Report Summary
+
+┌──────────────────────────────────────────────────────────────────────────────────┬────────────┬─────────────────┬─────────┐
+│                                      Target                                      │    Type    │ Vulnerabilities │ Secrets │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ incidentdesk-backend:local (debian 13.7)                                         │   debian   │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/alembic-1.20.0.dist-info/METADATA         │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/annotated_doc-0.0.5.dist-info/METADATA    │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/annotated_types-0.8.0.dist-info/METADATA  │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/anyio-4.15.1.dist-info/METADATA           │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/click-8.5.0.dist-info/METADATA            │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/fastapi-0.142.2.dist-info/METADATA        │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/h11-0.16.0.dist-info/METADATA             │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/httptools-0.8.0.dist-info/METADATA        │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/idna-3.20.dist-info/METADATA              │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/mako-1.4.3.dist-info/METADATA             │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/markupsafe-3.0.4.dist-info/METADATA       │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/opentelemetry_api-1.45.1.dist-info/METAD- │ python-pkg │        0        │    -    │
+│ ATA                                                                              │            │                 │         │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/pip-25.0.1.dist-info/METADATA             │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/prometheus_client-0.26.0.dist-info/METAD- │ python-pkg │        0        │    -    │
+│ ATA                                                                              │            │                 │         │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/prometheus_fastapi_instrumentator-8.1.0.- │ python-pkg │        0        │    -    │
+│ dist-info/METADATA                                                               │            │                 │         │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/psycopg-3.3.6.dist-info/METADATA          │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/psycopg_binary-3.3.6.dist-info/METADATA   │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/pydantic-2.13.5.dist-info/METADATA        │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/pydantic_core-2.46.5.dist-info/METADATA   │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/pydantic_settings-2.15.0.dist-info/METAD- │ python-pkg │        0        │    -    │
+│ ATA                                                                              │            │                 │         │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/python_dotenv-1.2.4.dist-info/METADATA    │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/pyyaml-6.0.3.dist-info/METADATA           │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/sqlalchemy-2.1.3.dist-info/METADATA       │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/starlette-1.7.0.dist-info/METADATA        │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/typing_extensions-4.16.0.dist-info/METAD- │ python-pkg │        0        │    -    │
+│ ATA                                                                              │            │                 │         │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/typing_inspection-0.4.4.dist-info/METADA- │ python-pkg │        0        │    -    │
+│ TA                                                                               │            │                 │         │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/uvicorn-0.54.0.dist-info/METADATA         │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/uvloop-0.23.0.dist-info/METADATA          │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/watchfiles-1.3.0.dist-info/METADATA       │ python-pkg │        0        │    -    │
+├──────────────────────────────────────────────────────────────────────────────────┼────────────┼─────────────────┼─────────┤
+│ usr/local/lib/python3.12/site-packages/websockets-17.2.dist-info/METADATA        │ python-pkg │        0        │    -    │
+└──────────────────────────────────────────────────────────────────────────────────┴────────────┴─────────────────┴─────────┘
+Legend:
+- '-': Not scanned
+- '0': Clean (no security findings detected)
+
+backend image exit code: 0
+
+$ trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 incidentdesk-frontend:local; echo "frontend image exit code: $?"
+
+Report Summary
+
+┌─────────────────────────────────────────────┬────────┬─────────────────┬─────────┐
+│                   Target                    │  Type  │ Vulnerabilities │ Secrets │
+├─────────────────────────────────────────────┼────────┼─────────────────┼─────────┤
+│ incidentdesk-frontend:local (alpine 3.23.4) │ alpine │       42        │    -    │
+└─────────────────────────────────────────────┴────────┴─────────────────┴─────────┘
+Legend:
+- '-': Not scanned
+- '0': Clean (no security findings detected)
+
+
+incidentdesk-frontend:local (alpine 3.23.4)
+===========================================
+Total: 42 (HIGH: 42, CRITICAL: 0)
+
+┌────────────┬─────────────────┬──────────┬────────┬───────────────────┬───────────────┬──────────────────────────────────────────────────────────────┐
+│  Library   │  Vulnerability  │ Severity │ Status │ Installed Version │ Fixed Version │                            Title                             │
+├────────────┼─────────────────┼──────────┼────────┼───────────────────┼───────────────┼──────────────────────────────────────────────────────────────┤
+│ c-ares     │ CVE-2026-33630  │ HIGH     │ fixed  │ 1.34.6-r0         │ 1.34.8-r0     │ c-ares: c-ares: Use-after-free / double-free in              │
+│            │                 │          │        │                   │               │ query-completion handling                                    │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-33630                   │
+├────────────┼─────────────────┤          │        ├───────────────────┼───────────────┼──────────────────────────────────────────────────────────────┤
+│ curl       │ CVE-2026-11352  │          │        │ 8.17.0-r1         │ 8.22.0-r0     │ curl: libcurl: curl/libcurl: Remote denial of service via    │
+│            │                 │          │        │                   │               │ QUIC UDP receive function...                                 │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-11352                   │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-11586  │          │        │                   │               │ curl: curl: Denial of Service via WebSocket PING flood       │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-11586                   │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-12064  │          │        │                   │               │ curl: curl: SSH host verification bypass when using          │
+│            │                 │          │        │                   │               │ schemeless URLs with SFTP/SCP...                             │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-12064                   │
+│            ├─────────────────┤          │        │                   ├───────────────┼──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-5773   │          │        │                   │ 8.20.0-r0     │ curl: libcurl: Wrong file transfer due to incorrect SMB      │
+│            │                 │          │        │                   │               │ connection reuse                                             │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-5773                    │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-6276   │          │        │                   │               │ curl: libcurl: Information disclosure due to cookie leak     │
+│            │                 │          │        │                   │               │ when reusing connections with...                             │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-6276                    │
+│            ├─────────────────┤          │        │                   ├───────────────┼──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-8286   │          │        │                   │ 8.22.0-r0     │ curl: curl: Insecure connection establishment due to TLS     │
+│            │                 │          │        │                   │               │ configuration mismatch                                       │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-8286                    │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-8458   │          │        │                   │               │ curl: libcurl: Unauthorized connection reuse due to a        │
+│            │                 │          │        │                   │               │ logical error                                                │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-8458                    │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-8925   │          │        │                   │               │ curl: curl: Double-free vulnerability in SASL authentication │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-8925                    │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-8927   │          │        │                   │               │ curl: Information disclosure due to uncleared proxy          │
+│            │                 │          │        │                   │               │ authentication state                                         │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-8927                    │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-9547   │          │        │                   │               │ curl: curl: Man-in-the-middle attack via SSH host key bypass │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-9547                    │
+├────────────┼─────────────────┤          │        ├───────────────────┼───────────────┼──────────────────────────────────────────────────────────────┤
+│ libcrypto3 │ CVE-2026-14456  │          │        │ 3.5.6-r0          │ 3.5.8-r0      │ openssl: OpenSSL: Denial of Service via unbounded memory     │
+│            │                 │          │        │                   │               │ growth in QUIC server...                                     │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-14456                   │
+│            ├─────────────────┤          │        │                   ├───────────────┼──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-45447  │          │        │                   │ 3.5.7-r0      │ openssl: Heap Use-After-Free in OpenSSL PKCS7_verify()       │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-45447                   │
+├────────────┼─────────────────┤          │        ├───────────────────┼───────────────┼──────────────────────────────────────────────────────────────┤
+│ libcurl    │ CVE-2026-11352  │          │        │ 8.17.0-r1         │ 8.22.0-r0     │ curl: libcurl: curl/libcurl: Remote denial of service via    │
+│            │                 │          │        │                   │               │ QUIC UDP receive function...                                 │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-11352                   │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-11586  │          │        │                   │               │ curl: curl: Denial of Service via WebSocket PING flood       │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-11586                   │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-12064  │          │        │                   │               │ curl: curl: SSH host verification bypass when using          │
+│            │                 │          │        │                   │               │ schemeless URLs with SFTP/SCP...                             │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-12064                   │
+│            ├─────────────────┤          │        │                   ├───────────────┼──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-5773   │          │        │                   │ 8.20.0-r0     │ curl: libcurl: Wrong file transfer due to incorrect SMB      │
+│            │                 │          │        │                   │               │ connection reuse                                             │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-5773                    │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-6276   │          │        │                   │               │ curl: libcurl: Information disclosure due to cookie leak     │
+│            │                 │          │        │                   │               │ when reusing connections with...                             │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-6276                    │
+│            ├─────────────────┤          │        │                   ├───────────────┼──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-8286   │          │        │                   │ 8.22.0-r0     │ curl: curl: Insecure connection establishment due to TLS     │
+│            │                 │          │        │                   │               │ configuration mismatch                                       │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-8286                    │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-8458   │          │        │                   │               │ curl: libcurl: Unauthorized connection reuse due to a        │
+│            │                 │          │        │                   │               │ logical error                                                │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-8458                    │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-8925   │          │        │                   │               │ curl: curl: Double-free vulnerability in SASL authentication │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-8925                    │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-8927   │          │        │                   │               │ curl: Information disclosure due to uncleared proxy          │
+│            │                 │          │        │                   │               │ authentication state                                         │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-8927                    │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-9547   │          │        │                   │               │ curl: curl: Man-in-the-middle attack via SSH host key bypass │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-9547                    │
+├────────────┼─────────────────┤          │        ├───────────────────┼───────────────┼──────────────────────────────────────────────────────────────┤
+│ libexpat   │ CVE-2026-45186  │          │        │ 2.7.5-r0          │ 2.8.1-r0      │ libexpat: denial of service via crafted XML input            │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-45186                   │
+│            ├─────────────────┤          │        │                   ├───────────────┼──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-66046  │          │        │                   │ 2.8.4-r0      │ expat: Expat: Denial of Service via quadratic complexity in  │
+│            │                 │          │        │                   │               │ attribute processing                                         │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-66046                   │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-76641  │          │        │                   │               │ expat: Expat: Denial of Service via XML external entity      │
+│            │                 │          │        │                   │               │ parsing                                                      │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-76641                   │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-76956  │          │        │                   │               │ libexpat: libexpat: Denial of Service via hash flooding      │
+│            │                 │          │        │                   │               │ attack with crafted XML...                                   │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-76956                   │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-76957  │          │        │                   │               │ libexpat: libexpat: Memory corruption vulnerability allows   │
+│            │                 │          │        │                   │               │ arbitrary code execution or denial of...                     │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-76957                   │
+│            ├─────────────────┤          │        │                   ├───────────────┼──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-93990  │          │        │                   │ 2.8.5-r0      │ expat: Expat: XML Injection via Malformed UTF-16 Input       │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-93990                   │
+├────────────┼─────────────────┤          │        ├───────────────────┼───────────────┼──────────────────────────────────────────────────────────────┤
+│ libssl3    │ CVE-2026-14456  │          │        │ 3.5.6-r0          │ 3.5.8-r0      │ openssl: OpenSSL: Denial of Service via unbounded memory     │
+│            │                 │          │        │                   │               │ growth in QUIC server...                                     │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-14456                   │
+│            ├─────────────────┤          │        │                   ├───────────────┼──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-45447  │          │        │                   │ 3.5.7-r0      │ openssl: Heap Use-After-Free in OpenSSL PKCS7_verify()       │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-45447                   │
+├────────────┼─────────────────┤          │        ├───────────────────┼───────────────┼──────────────────────────────────────────────────────────────┤
+│ libuuid    │ CVE-2026-53612  │          │        │ 2.41.4-r0         │ 2.41.6-r0     │ util-linux: util-linux: TOCTOU in the mount program when     │
+│            │                 │          │        │                   │               │ applying post-mount ownership/mode changes...                │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-53612                   │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-53613  │          │        │                   │               │ util-linux: util-linux: TOCTOU in the mount program via      │
+│            │                 │          │        │                   │               │ ancestor directory swap on...                                │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-53613                   │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-53614  │          │        │                   │               │ util-linux: util-linux: SUID mount(8) allows nosuid/noexec   │
+│            │                 │          │        │                   │               │ bypass via LIBMOUNT_FORCE_MOUNT2                             │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-53614                   │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-76642  │          │        │                   │               │ util-linux: util-linux: failed external mount helper still   │
+│            │                 │          │        │                   │               │ runs privileged X-mount post-hooks                           │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-76642                   │
+│            ├─────────────────┤          │        │                   ├───────────────┼──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-78408  │          │        │                   │ 2.41.6-r1     │ util-linux: util-linux: nsenter --join-cgroup leaks root     │
+│            │                 │          │        │                   │               │ cgroup migration authority                                   │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-78408                   │
+│            ├─────────────────┤          │        │                   ├───────────────┼──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-78410  │          │        │                   │ 2.41.6-r0     │ util-linux: util-linux: restricted bind mounts do not pin    │
+│            │                 │          │        │                   │               │ the source, allowing X-mount.owner/group/mode...             │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-78410                   │
+├────────────┼─────────────────┤          │        ├───────────────────┼───────────────┼──────────────────────────────────────────────────────────────┤
+│ libxml2    │ CVE-2026-6732   │          │        │ 2.13.9-r0         │ 2.13.9-r1     │ libxml2: libxml2: Denial of Service via crafted              │
+│            │                 │          │        │                   │               │ XSD-validated document                                       │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-6732                    │
+├────────────┼─────────────────┤          │        ├───────────────────┼───────────────┼──────────────────────────────────────────────────────────────┤
+│ pcre2      │ CVE-2026-103111 │          │        │ 10.47-r0          │ 10.49-r0      │ pcre2: pcre2: Out-of-bounds write via crafted regular        │
+│            │                 │          │        │                   │               │ expression                                                   │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-103111                  │
+│            ├─────────────────┤          │        │                   ├───────────────┼──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-86145  │          │        │                   │ 10.48-r0      │ pcre2: PCRE2: Out-of-bounds write allows arbitrary code      │
+│            │                 │          │        │                   │               │ execution via crafted regular expressions...                 │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-86145                   │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-89157  │          │        │                   │               │ pcre2: PCRE2: Out-of-bounds write via large pattern input    │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-89157                   │
+│            ├─────────────────┤          │        │                   │               ├──────────────────────────────────────────────────────────────┤
+│            │ CVE-2026-89161  │          │        │                   │               │ pcre2: PCRE2: Memory corruption vulnerability in             │
+│            │                 │          │        │                   │               │ pcre2_jit_match                                              │
+│            │                 │          │        │                   │               │ https://avd.aquasec.com/nvd/cve-2026-89161                   │
+└────────────┴─────────────────┴──────────┴────────┴───────────────────┴───────────────┴──────────────────────────────────────────────────────────────┘
+frontend image exit code: 1
+
+# for context, the full picture including unfixed and lower-severity findings (reported, not gated)
+$ for i in backend frontend; do printf "%-9s " $i; trivy image --quiet --format json incidentdesk-$i:local | python3 -c "import json,sys,collections; c=collections.Counter(v[\"Severity\"] for r in json.load(sys.stdin).get(\"Results\",[]) for v in r.get(\"Vulnerabilities\") or []); print(dict(sorted(c.items())) or \"no vulnerabilities\")"; done
+backend   {'HIGH': 44, 'LOW': 62, 'MEDIUM': 63, 'UNKNOWN': 2}
+frontend  {'HIGH': 42, 'LOW': 50, 'MEDIUM': 81, 'UNKNOWN': 2}
+
+# GATE BLOCKED: the frontend image failed with 42 fixable HIGH CVEs, all inherited from the nginx-unprivileged base image (curl, OpenSSL, c-ares).
+# FIX: apk upgrade in the runtime stage + remove curl (unused). Rebuilt and re-scanned:
+$ grep -A2 "USER root" 20-final-devops-project/application/frontend/Dockerfile
+USER root
+RUN apk upgrade --no-cache && apk del --no-cache curl
+ENV BACKEND_URL=http://backend:8000 \
+
+$ trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 incidentdesk-frontend:local; echo "frontend image exit code: $?"
+
+Report Summary
+
+┌─────────────────────────────────────────────┬────────┬─────────────────┬─────────┐
+│                   Target                    │  Type  │ Vulnerabilities │ Secrets │
+├─────────────────────────────────────────────┼────────┼─────────────────┼─────────┤
+│ incidentdesk-frontend:local (alpine 3.23.4) │ alpine │        0        │    -    │
+└─────────────────────────────────────────────┴────────┴─────────────────┴─────────┘
+Legend:
+- '-': Not scanned
+- '0': Clean (no security findings detected)
+
+frontend image exit code: 0
+
+$ docker run --rm --cpus=1 --entrypoint id incidentdesk-frontend:local; docker run --rm --cpus=1 --entrypoint sh incidentdesk-frontend:local -c "command -v curl || echo curl removed"
+uid=101(nginx) gid=101(nginx) groups=101(nginx),101(nginx)
+curl removed
+
+# SECRET SCAN — gitleaks. Not committed yet, so `dir` mode here; CI runs `git` mode over the project history (fetch-depth: 0)
+$ gitleaks version
+8.30.1
+
+$ gitleaks dir 20-final-devops-project --config 20-final-devops-project/security/gitleaks.toml --redact --no-banner; echo "gitleaks exit code: $?"
+12:40AM INF scanned ~173307 bytes (173.31 KB) in 48.3ms
+12:40AM WRN leaks found: 2
+gitleaks exit code: 1
+
+# prove the rule set actually fires: a throwaway file with a realistic leak, scanned, then deleted
+$ mkdir -p /tmp/leak-test && printf "DATABASE_URL=postgresql+psycopg://incidentdesk:Pr0d-S3cret-2026@db.internal:5432/incidentdesk\nAWS_ACCESS_KEY_ID=AKIAQ3EGTLVDEMOKEY7Q\n" > /tmp/leak-test/.env && gitleaks dir /tmp/leak-test --config 20-final-devops-project/security/gitleaks.toml --redact --no-banner 2>&1 | grep -E "RuleID|Finding|leaks found"; echo "exit code: $?"; rm -rf /tmp/leak-test
+12:40AM WRN leaks found: 2
+exit code: 0
+

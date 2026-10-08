@@ -1,0 +1,5 @@
+# Broken variant 4: "the backend was being throttled, so we removed its CPU request and limit".
+backend:
+  resources:
+    requests: null
+    limits: { cpu: null, memory: 256Mi }

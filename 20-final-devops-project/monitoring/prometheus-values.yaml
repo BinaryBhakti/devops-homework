@@ -1,0 +1,85 @@
+# prometheus-community/prometheus — deliberately lean for a 2-node laptop cluster (~250 MiB total).
+#   helm upgrade --install prometheus prometheus-community/prometheus -n monitoring -f prometheus-values.yaml
+#
+# serverFiles.alerting_rules.yml below is generated from alert-rules.yml (edit that file, then
+# re-run the snippet in README.md) — the chart wants the rules as YAML, not a string.
+#
+# Why not kube-prometheus-stack: it runs ~8 components (operator, alertmanager, node-exporter
+# DaemonSet, ...) and wants >1.5 GiB; this cluster has ~4 GiB for EVERYTHING, and this repo has
+# already seen the control plane starve (Homework 13, Task 4). Scraping uses the pod
+# annotations the chart adds (prometheus.io/scrape), so no ServiceMonitor/operator is needed.
+server:
+  retention: 2d
+  persistentVolume:
+    enabled: false          # emptyDir: metrics are lost on restart — acceptable for a lab
+  resources:
+    requests: { cpu: 100m, memory: 192Mi }
+    limits: { memory: 384Mi }
+  global:
+    scrape_interval: 15s
+    evaluation_interval: 15s
+alertmanager:
+  enabled: false            # alerts still evaluate and show as pending/firing in Prometheus /alerts
+prometheus-pushgateway:
+  enabled: false
+prometheus-node-exporter:
+  enabled: false            # node CPU/memory come from the kubelet's cAdvisor endpoint instead
+kube-state-metrics:
+  enabled: true             # needed for restarts, readiness and HPA metrics
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 64Mi }
+
+serverFiles:
+  alerting_rules.yml:
+    # IncidentDesk alerting rules. Label names follow the prometheus-community/prometheus chart's
+    # "kubernetes-pods" job, which copies pod labels in (app.kubernetes.io/component ->
+    # app_kubernetes_io_component) and adds namespace/pod.
+    groups:
+      - name: incidentdesk-availability
+        rules:
+          - alert: IncidentDeskBackendDown
+            expr: sum(up{namespace="incidentdesk", app_kubernetes_io_component="backend"}) == 0
+                  or absent(up{namespace="incidentdesk", app_kubernetes_io_component="backend"})
+            for: 1m
+            labels: { severity: critical }
+            annotations:
+              summary: "No IncidentDesk backend pod is being scraped successfully"
+              runbook: "kubectl -n incidentdesk get pods,endpointslices; kubectl -n incidentdesk describe deploy incidentdesk-backend"
+          - alert: IncidentDeskPodNotReady
+            expr: sum by (pod) (kube_pod_status_ready{namespace="incidentdesk", condition="false"}) == 1
+            for: 2m
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.pod }} has been NotReady for 2 minutes (readiness probe failing)"
+          - alert: IncidentDeskPodRestarting
+            expr: increase(kube_pod_container_status_restarts_total{namespace="incidentdesk"}[10m]) > 2
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.pod }}/{{ $labels.container }} restarted {{ $value | humanize }} times in 10 minutes"
+      - name: incidentdesk-golden-signals
+        rules:
+          - alert: IncidentDeskHighErrorRate
+            expr: |
+              sum(rate(http_requests_total{namespace="incidentdesk", status="5xx"}[5m]))
+                / sum(rate(http_requests_total{namespace="incidentdesk"}[5m])) > 0.05
+            for: 2m
+            labels: { severity: critical }
+            annotations:
+              summary: "{{ $value | humanizePercentage }} of API requests are failing"
+          - alert: IncidentDeskHighLatencyP95
+            expr: |
+              histogram_quantile(0.95,
+                sum by (le) (rate(http_request_duration_seconds_bucket{namespace="incidentdesk"}[5m]))) > 0.5
+            for: 5m
+            labels: { severity: warning }
+            annotations:
+              summary: "API p95 latency is {{ $value | humanizeDuration }}"
+          - alert: IncidentDeskHPAAtMax
+            expr: |
+              kube_horizontalpodautoscaler_status_current_replicas{namespace="incidentdesk"}
+                >= kube_horizontalpodautoscaler_spec_max_replicas{namespace="incidentdesk"}
+            for: 10m
+            labels: { severity: warning }
+            annotations:
+              summary: "HPA {{ $labels.horizontalpodautoscaler }} has been at max replicas for 10 minutes — capacity, not just load"
