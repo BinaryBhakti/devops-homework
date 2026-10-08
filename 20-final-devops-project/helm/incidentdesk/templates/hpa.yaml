@@ -18,6 +18,10 @@ spec:
         name: cpu
         target: { type: Utilization, averageUtilization: {{ .Values.hpa.targetCPUUtilizationPercentage }} }
   behavior:
+    scaleUp:
+      # >0 ignores short spikes — e.g. Python start-up CPU, which on a starved node read as
+      # 550% of request and scaled 1 -> 3 replicas that then starved each other.
+      stabilizationWindowSeconds: {{ .Values.hpa.scaleUpStabilizationSeconds | default 0 }}
     scaleDown:
       stabilizationWindowSeconds: 120
 {{- end }}

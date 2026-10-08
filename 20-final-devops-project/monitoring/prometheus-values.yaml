@@ -10,6 +10,14 @@
 # annotations the chart adds (prometheus.io/scrape), so no ServiceMonitor/operator is needed.
 server:
   retention: 2d
+  # Probe slack for a CPU-starved laptop node: with the defaults (liveness 3 x 15 s, 10 s timeout)
+  # the kubelet killed Prometheus while it was replaying its WAL after a restart — and every
+  # restart replays the WAL again, so the restarts fed themselves.
+  livenessProbeInitialDelay: 120
+  livenessProbeTimeout: 20
+  livenessProbeFailureThreshold: 6
+  readinessProbeTimeout: 10
+  readinessProbeFailureThreshold: 6
   persistentVolume:
     enabled: false          # emptyDir: metrics are lost on restart — acceptable for a lab
   resources:
