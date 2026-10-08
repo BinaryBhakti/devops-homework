@@ -1,9 +1,0 @@
-# The page the app serves. Changing it in Git (and only in Git) is how a release happens.
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: gitops-demo-page
-  namespace: session20
-data:
-  index.html: |
-    gitops-demo v1 — deployed by Argo CD from Git

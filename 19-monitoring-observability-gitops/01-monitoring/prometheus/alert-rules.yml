@@ -1,0 +1,43 @@
+groups:
+  - name: orders-api
+    rules:
+      - alert: AppDown                       # application health: the scrape itself fails
+        expr: up{job="orders-api"} == 0
+        for: 15s
+        labels: { severity: critical }
+        annotations:
+          summary: "orders-api is not responding to scrapes"
+      - alert: AppUnhealthy                  # application health: the app says it is unhealthy
+        expr: app_healthy == 0
+        for: 15s
+        labels: { severity: critical }
+        annotations:
+          summary: "orders-api /healthz reports unhealthy"
+      - alert: HighErrorRate                 # symptom users feel
+        expr: |
+          sum(rate(http_requests_total{route="/api/orders",status=~"5.."}[1m]))
+            / sum(rate(http_requests_total{route="/api/orders"}[1m])) > 0.05
+        for: 30s
+        labels: { severity: warning }
+        annotations:
+          summary: "more than 5% of /api/orders requests are failing ({{ $value | humanizePercentage }})"
+      - alert: HighLatencyP95
+        expr: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{route="/api/orders"}[1m]))) > 0.5
+        for: 30s
+        labels: { severity: warning }
+        annotations:
+          summary: "p95 latency of /api/orders is {{ $value | humanizeDuration }}"
+  - name: resources
+    rules:
+      - alert: AppHighCPU                    # CPU utilisation of the app process
+        expr: rate(process_cpu_seconds_total{job="orders-api"}[1m]) > 0.5
+        for: 30s
+        labels: { severity: warning }
+        annotations:
+          summary: "orders-api is using {{ $value | humanize }} CPU cores"
+      - alert: AppHighMemory                 # memory utilisation of the app process
+        expr: process_resident_memory_bytes{job="orders-api"} > 300e6
+        for: 30s
+        labels: { severity: warning }
+        annotations:
+          summary: "orders-api resident memory is {{ $value | humanize1024 }}B"

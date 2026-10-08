@@ -1,0 +1,60 @@
+########## TASK 1 — an incident, seen through metrics, alerts and logs ##########
+
+# inject failure: 30% of /api/orders return 500 and every request is 700 ms slower
+$ curl -s -X POST localhost:8000/admin/chaos -H 'Content-Type: application/json' -d '{"error_rate": 0.3, "slow_ms": 700}'; echo
+{"error_rate":0.3,"healthy":true,"slow_ms":700}
+
+
+$ sleep 25; alerts
+   HighLatencyP95 PENDING - p95 latency of /api/orders is 835.9ms
+
+# alerts go PENDING first: the rule must stay true for its "for:" duration before it FIRES
+$ sleep 40; alerts
+   HighErrorRate FIRING - more than 5% of /api/orders requests are failing (20.37%)
+   HighLatencyP95 FIRING - p95 latency of /api/orders is 962.5ms
+
+$ PQ 'sum(rate(http_requests_total{route="/api/orders",status=~"5.."}[1m])) / sum(rate(http_requests_total{route="/api/orders"}[1m]))'
+    => 0.2069
+
+$ PQ 'histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{route="/api/orders"}[1m])))'
+    => 0.9625
+
+# Alertmanager received them and delivered to the webhook receiver (stand-in for Slack/PagerDuty)
+$ curl -s localhost:9093/api/v2/alerts | python3 -c 'import json,sys; [print("  ", a["labels"]["alertname"], a["status"]["state"], a["labels"]["severity"]) for a in json.load(sys.stdin)]'
+   HighErrorRate active warning
+   HighLatencyP95 active warning
+
+$ docker compose logs alert-receiver --no-log-prefix | tail -4
+ALERT FIRING HighLatencyP95 warning - p95 latency of /api/orders is 908.1ms
+ALERT FIRING HighErrorRate warning - more than 5% of /api/orders requests are failing (19.85%)
+
+# LOGS — the same incident in Loki (LogQL): error lines from the app, with trace ids
+$ curl -s --get localhost:3100/loki/api/v1/query_range --data-urlencode 'start='1791411211'000000000' --data-urlencode 'query={service="app"} | json | level="error"' --data-urlencode limit=3 | python3 -c 'import json,sys; [print("  ", v[1][:200]) for s in json.load(sys.stdin)["data"]["result"] for v in s["values"][:3]]' 2>&1 | head -3 || docker compose exec -T loki wget -qO- 'http://localhost:3100/ready'
+   {"ts": "2026-10-07T22:23:22Z", "level": "error", "service": "orders-api", "version": "1.0.0", "msg": "database timeout while listing orders", "trace_id": "98251b4d55f0a69da82e044dd4afe7d3", "route": "
+   {"ts": "2026-10-07T22:23:23Z", "level": "error", "service": "orders-api", "version": "1.0.0", "msg": "database timeout while listing orders", "trace_id": "341743eae5838a6ce0eff2a8f4798a5f", "route": "
+   {"ts": "2026-10-07T22:23:27Z", "level": "error", "service": "orders-api", "version": "1.0.0", "msg": "database timeout while listing orders", "trace_id": "2d03463b0d11a72d1a6230d82ac00cf5", "route": "
+
+# APPLICATION HEALTH incident: flip /healthz to unhealthy
+$ curl -s -X POST localhost:8000/admin/health -H 'Content-Type: application/json' -d '{"healthy": false}'; echo; curl -s -o /dev/null -w 'GET /healthz -> HTTP %{http_code}\n' localhost:8000/healthz
+{"error_rate":0.3,"healthy":false,"slow_ms":700}
+
+GET /healthz -> HTTP 503
+
+$ sleep 35; alerts
+   AppUnhealthy FIRING - orders-api /healthz reports unhealthy
+   HighErrorRate FIRING - more than 5% of /api/orders requests are failing (23.08%)
+   HighLatencyP95 FIRING - p95 latency of /api/orders is 962.7ms
+
+# RECOVER: remove the chaos and restore health, then watch the alerts resolve
+$ curl -s -X POST localhost:8000/admin/chaos -H 'Content-Type: application/json' -d '{"error_rate": 0, "slow_ms": 0}' >/dev/null; curl -s -X POST localhost:8000/admin/health -H 'Content-Type: application/json' -d '{"healthy": true}'; echo
+{"error_rate":0,"healthy":true,"slow_ms":0}
+
+
+$ sleep 90; alerts
+   (no active alerts)
+
+$ docker compose logs alert-receiver --no-log-prefix | grep RESOLVED | tail -4
+ALERT RESOLVED AppUnhealthy critical - orders-api /healthz reports unhealthy
+ALERT RESOLVED HighErrorRate warning - more than 5% of /api/orders requests are failing (5.019%)
+ALERT RESOLVED HighLatencyP95 warning - p95 latency of /api/orders is 557.1ms
+

@@ -1,0 +1,85 @@
+########## TASK 1 — Monitoring: metrics, logs, alerts, CPU, memory, application health ##########
+
+# start the stack (compose file extends the course 03-prometheus / 04-grafana examples)
+$ docker compose up -d 2>&1 | grep -E "Started|Running|Healthy" | sort | uniq -c | sed "s/^ *//"
+1  Container session20-alert-receiver-1 Started 
+1  Container session20-alertmanager-1 Started 
+1  Container session20-alloy-1 Started 
+1  Container session20-app-1 Started 
+1  Container session20-grafana-1 Started 
+1  Container session20-jaeger-1 Started 
+1  Container session20-loadgen-1 Started 
+1  Container session20-loki-1 Started 
+1  Container session20-node-exporter-1 Started 
+1  Container session20-prometheus-1 Started 
+
+$ sleep 40; docker compose ps --format "table {{.Service}}\t{{.Status}}"
+SERVICE          STATUS
+alert-receiver   Up 47 seconds
+alertmanager     Up 47 seconds
+alloy            Up 44 seconds
+app              Up 47 seconds (healthy)
+grafana          Up 44 seconds
+jaeger           Up 47 seconds
+loadgen          Up 45 seconds
+loki             Up 47 seconds
+node-exporter    Up 47 seconds
+prometheus       Up 47 seconds
+
+# METRICS — the app exposes them; Prometheus scrapes them
+$ curl -s localhost:8000/metrics | grep -E '^(http_requests_total|app_healthy|orders_created_total|http_requests_in_flight)' | head -8
+http_requests_total{method="GET",route="/api/orders",status="200"} 73.0
+http_requests_total{method="POST",route="/api/orders",status="201"} 36.0
+http_requests_total{method="GET",route="/healthz",status="200"} 1.0
+http_requests_in_flight 2.0
+app_healthy 1.0
+orders_created_total 36.0
+
+$ curl -s localhost:9090/api/v1/targets | python3 -c 'import json,sys; [print("  ", t["labels"]["job"].ljust(12), t["health"].ljust(5), t["scrapeUrl"]) for t in json.load(sys.stdin)["data"]["activeTargets"]]'
+   node         up    http://node-exporter:9100/metrics
+   orders-api   up    http://app:8000/metrics
+   prometheus   up    http://localhost:9090/metrics
+
+# request rate, error ratio and p95 latency for /api/orders (PromQL)
+$ PQ 'sum by (status) (rate(http_requests_total{route="/api/orders"}[1m]))'
+   {'status': '200'} => 1.1146
+   {'status': '201'} => 0.5308
+
+$ PQ 'histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{route="/api/orders"}[1m])))'
+    => 0.0997
+
+# CPU UTILISATION — the app process (its own process_* metrics) and the whole Docker VM (node-exporter)
+$ PQ 'rate(process_cpu_seconds_total{job="orders-api"}[1m])'
+   {'service': 'orders-api'} => 0.0514
+
+$ PQ '100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[1m])))'
+    => 86.8612
+
+# MEMORY UTILISATION
+$ PQ 'process_resident_memory_bytes{job="orders-api"} / 1024 / 1024'
+   {'service': 'orders-api'} => 42.2852
+
+$ PQ '100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)'
+    => 53.1841
+
+# APPLICATION HEALTH — three independent signals
+$ curl -s localhost:8000/healthz; echo
+{"status":"ok","version":"1.0.0"}
+
+
+$ docker inspect session20-app-1 --format 'docker healthcheck: {{.State.Health.Status}}'
+docker healthcheck: healthy
+
+$ PQ 'up{job="orders-api"}'; PQ 'app_healthy'
+   {'service': 'orders-api'} => 1.0
+   {'service': 'orders-api'} => 1.0
+
+# ALERTS — rules loaded and currently inactive
+$ curl -s localhost:9090/api/v1/rules | python3 -c 'import json,sys; [print("  ", r["name"].ljust(20), r["state"]) for g in json.load(sys.stdin)["data"]["groups"] for r in g["rules"]]'
+   AppDown              inactive
+   AppUnhealthy         inactive
+   HighErrorRate        inactive
+   HighLatencyP95       inactive
+   AppHighCPU           inactive
+   AppHighMemory        inactive
+
