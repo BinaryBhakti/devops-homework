@@ -1,6 +1,11 @@
 # Local Minikube. Small, single replica, a throwaway database password.
 backend:
   replicas: 1
+  probes:
+    # dev runs on a laptop node that is often CPU-starved: Python import + uvicorn start took
+    # longer than the default 60 s startup budget and the kubelet restarted it (startup probe
+    # "connection refused"). Same probe, bigger budget — 3 minutes.
+    startup: { path: /health, periodSeconds: 3, failureThreshold: 60 }
   resources:
     requests: { cpu: 50m, memory: 96Mi }
     limits: { cpu: 300m, memory: 256Mi }
