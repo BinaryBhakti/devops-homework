@@ -6,15 +6,17 @@ backend:
     # longer than the default 60 s startup budget and the kubelet restarted it (startup probe
     # "connection refused"). Same probe, bigger budget — 3 minutes.
     startup: { path: /health, periodSeconds: 3, failureThreshold: 60 }
+    readiness: { path: /ready, periodSeconds: 5, timeoutSeconds: 5, failureThreshold: 3 }
+    liveness: { path: /health, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 6 }
   resources:
     requests: { cpu: 50m, memory: 96Mi }
     limits: { cpu: 300m, memory: 256Mi }
   image:
-    tag: "sha-6710b57"              # updated by the CI "gitops" job on every main build
+    tag: "sha-5476e02"              # updated by the CI "gitops" job on every main build
 frontend:
   replicas: 1
   image:
-    tag: "sha-6710b57"              # updated by the CI "gitops" job on every main build
+    tag: "sha-5476e02"              # updated by the CI "gitops" job on every main build
 config:
   APP_ENV: dev
   LOG_LEVEL: debug
@@ -26,6 +28,7 @@ hpa:
   enabled: true
   minReplicas: 1
   maxReplicas: 3
+  scaleUpStabilizationSeconds: 180   # ignore start-up CPU spikes on the laptop node
 pdb:
   enabled: false
 ingress:

@@ -52,7 +52,8 @@ spec:
           livenessProbe:
             httpGet: { path: /healthz, port: http }
             periodSeconds: 10
-            timeoutSeconds: 3
+            timeoutSeconds: 5
+            failureThreshold: 6       # a minute of failures before a restart: nginx is not "stuck" after one slow answer
           resources:
             {{- toYaml $f.resources | nindent 12 }}
           securityContext:
