@@ -5,14 +5,14 @@ metadata:
   namespace: session20
   labels: { app: gitops-demo }
 spec:
-  replicas: 2
+  replicas: 3
   selector:
     matchLabels: { app: gitops-demo }
   template:
     metadata:
       labels: { app: gitops-demo }
       annotations:
-        page-version: "v1"          # bumped with the page so a content change rolls the pods
+        page-version: "v2"          # bumped with the page so a content change rolls the pods
     spec:
       containers:
         - name: web
