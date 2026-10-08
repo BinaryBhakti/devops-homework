@@ -12,11 +12,11 @@ backend:
     requests: { cpu: 50m, memory: 96Mi }
     limits: { cpu: 300m, memory: 256Mi }
   image:
-    tag: "sha-bf87a40"              # updated by the CI "gitops" job on every main build
+    tag: "sha-212269d"              # updated by the CI "gitops" job on every main build
 frontend:
   replicas: 1
   image:
-    tag: "sha-bf87a40"              # updated by the CI "gitops" job on every main build
+    tag: "sha-212269d"              # updated by the CI "gitops" job on every main build
 config:
   APP_ENV: dev
   LOG_LEVEL: debug
