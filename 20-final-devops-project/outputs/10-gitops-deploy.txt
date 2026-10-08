@@ -74,3 +74,66 @@ pods                    3      20
 requests.cpu            120m   1500m
 requests.memory         256Mi  1536Mi
 
+########## STEADY STATE — after the fixes found on the first deploys (see 11-real-deploy-issues.txt) ##########
+
+$ kubectl -n argocd get application incidentdesk-dev
+NAME               SYNC STATUS   HEALTH STATUS
+incidentdesk-dev   Synced        Healthy
+
+$ kubectl -n argocd get application incidentdesk-dev -o jsonpath='synced to: {.status.sync.revision}{"\n"}'; git fetch -q origin gitops-config; git log -1 --format='gitops-config HEAD: %H  (%an: %s)' origin/gitops-config
+synced to: a3271347cab5907281029e6ea270b0e09e073342
+gitops-config HEAD: 63bdb1488e6316b21968c0d46b66d54f88004f84  (github-actions[bot]: gitops: deploy incidentdesk sha-bf87a40 to dev [skip ci])
+
+$ kubectl -n incidentdesk get deploy,statefulset,svc,ingress,hpa,pvc
+NAME                                    READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/incidentdesk-backend    2/2     2            2           10h
+deployment.apps/incidentdesk-frontend   1/1     1            1           10h
+
+NAME                                     READY   AGE
+statefulset.apps/incidentdesk-postgres   1/1     10h
+
+NAME                            TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE
+service/incidentdesk-backend    ClusterIP   10.97.37.97    <none>        8000/TCP   10h
+service/incidentdesk-frontend   ClusterIP   10.96.148.49   <none>        80/TCP     10h
+service/incidentdesk-postgres   ClusterIP   None           <none>        5432/TCP   10h
+
+NAME                                     CLASS   HOSTS                ADDRESS        PORTS   AGE
+ingress.networking.k8s.io/incidentdesk   nginx   incidentdesk.local   192.168.49.2   80      10h
+
+NAME                                                       REFERENCE                         TARGETS         MINPODS   MAXPODS   REPLICAS   AGE
+horizontalpodautoscaler.autoscaling/incidentdesk-backend   Deployment/incidentdesk-backend   cpu: 243%/60%   1         2         2          10h
+
+NAME                                                 STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+persistentvolumeclaim/data-incidentdesk-postgres-0   Bound    pvc-c2307c1f-91ab-4f75-b647-2e6c9781c5b2   1Gi        RWO            standard       <unset>                 10h
+
+$ kubectl -n incidentdesk get pods -o wide
+NAME                                     READY   STATUS    RESTARTS      AGE   IP             NODE       NOMINATED NODE   READINESS GATES
+incidentdesk-backend-5c85fb7446-7qppn    1/1     Running   5 (11m ago)   8h    10.244.0.150   minikube   <none>           <none>
+incidentdesk-backend-5c85fb7446-lld89    1/1     Running   1 (11m ago)   60m   10.244.0.151   minikube   <none>           <none>
+incidentdesk-frontend-767bd45b7c-hpmcw   1/1     Running   1 (12m ago)   8h    10.244.0.149   minikube   <none>           <none>
+incidentdesk-postgres-0                  1/1     Running   7 (12m ago)   10h   10.244.0.130   minikube   <none>           <none>
+
+$ kubectl -n incidentdesk get deploy -o jsonpath='{range .items[*]}{.metadata.name}: {.spec.template.spec.containers[0].image}{"\n"}{end}'
+incidentdesk-backend: ghcr.io/binarybhakti/incidentdesk-backend:sha-e6a6703
+incidentdesk-frontend: ghcr.io/binarybhakti/incidentdesk-frontend:sha-e6a6703
+
+# end to end, from inside the cluster: frontend nginx -> /api -> backend -> PostgreSQL
+$ kubectl run e2e --image=curlimages/curl:8.11.1 --restart=Never -- sleep 600 >/dev/null && kubectl wait pod/e2e --for=condition=Ready --timeout=120s >/dev/null && echo probe ready
+probe ready
+
+$ kubectl exec e2e -- curl -s -X POST http://incidentdesk-frontend.incidentdesk/api/incidents -H 'Content-Type: application/json' -d '{"title":"Deployed by Argo CD from gitops-config","service":"platform","severity":"SEV4","assignee":"gitops"}' | cut -c1-160; echo
+{"title":"Deployed by Argo CD from gitops-config","description":"","service":"platform","severity":"SEV4","status":"OPEN","assignee":"gitops","id":1,"created_at
+
+
+$ kubectl exec e2e -- curl -s http://incidentdesk-frontend.incidentdesk/api/incidents/stats; echo
+{"total":1,"open":1,"investigating":0,"resolved":0,"sev1_open":0}
+
+$ kubectl exec e2e -- curl -s -o /dev/null -w 'via the NGINX Ingress (Host: incidentdesk.local) -> HTTP %{http_code}\n' -H 'Host: incidentdesk.local' http://ingress-nginx-controller.ingress-nginx.svc/
+via the NGINX Ingress (Host: incidentdesk.local) -> HTTP 200
+
+$ kubectl exec e2e -- curl -s -H 'Host: incidentdesk.local' http://ingress-nginx-controller.ingress-nginx.svc/api/incidents/stats; echo
+{"total":1,"open":1,"investigating":0,"resolved":0,"sev1_open":0}
+
+$ kubectl delete pod e2e --wait=false
+pod "e2e" deleted from default namespace
+

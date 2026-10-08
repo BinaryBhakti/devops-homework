@@ -1,0 +1,88 @@
+########## CHALLENGES 5 + 6 — someone edited the Service and the Ingress directly with kubectl ##########
+
+# BEFORE
+$ kubectl -n argocd get application incidentdesk-dev
+NAME               SYNC STATUS   HEALTH STATUS
+incidentdesk-dev   Synced        Healthy
+
+$ kubectl -n incidentdesk get pods
+NAME                                    READY   STATUS    RESTARTS      AGE
+incidentdesk-backend-858d7fbb8b-dkxgh   1/1     Running   0             7m57s
+incidentdesk-backend-858d7fbb8b-xxb99   1/1     Running   0             4m11s
+incidentdesk-frontend-765f5c78f-tkjmh   1/1     Running   0             42m
+incidentdesk-postgres-0                 1/1     Running   7 (58m ago)   11h
+
+$ api
+frontend /api/incidents -> HTTP 200
+
+# FAULT 5: the backend Service selector is changed by hand
+$ kubectl -n incidentdesk patch svc incidentdesk-backend --type=json --patch-file '/Users/ashmit/Desktop/DEV OPs/devops-homework/20-final-devops-project/troubleshooting/05-service-selector.patch.json' && kubectl -n incidentdesk get svc incidentdesk-backend -o jsonpath='selector: {.spec.selector}{"\n"}'
+service/incidentdesk-backend patched
+selector: {"app.kubernetes.io/component":"api","app.kubernetes.io/instance":"incidentdesk","app.kubernetes.io/name":"incidentdesk"}
+
+$ kubectl -n incidentdesk get endpointslices -l kubernetes.io/service-name=incidentdesk-backend; api
+NAME                         ADDRESSTYPE   PORTS     ENDPOINTS   AGE
+incidentdesk-backend-8thd8   IPv4          <unset>   <unset>     11h
+frontend /api/incidents -> HTTP 502
+
+# with selfHeal on, Argo CD should put Git's version back. How long?
+$ s=$(date +%s); for i in $(seq 1 72); do sel=$(kubectl -n incidentdesk get svc incidentdesk-backend -o jsonpath='{.spec.selector.app\.kubernetes\.io/component}'); [ "$sel" = backend ] && { echo "selector restored after $(( $(date +%s)-s )) s"; break; }; sleep 5; done; api
+selector restored after 5 s
+frontend /api/incidents -> HTTP 200
+
+# FAULT 6: the Ingress backend port is changed by hand
+$ kubectl -n incidentdesk patch ingress incidentdesk --type=json --patch-file '/Users/ashmit/Desktop/DEV OPs/devops-homework/20-final-devops-project/troubleshooting/06-ingress-port.patch.json' && kubectl -n incidentdesk get ingress incidentdesk -o jsonpath='port: {.spec.rules[0].http.paths[0].backend.service.port.number}{"\n"}'
+ingress.networking.k8s.io/incidentdesk patched
+port: 8080
+
+$ kubectl exec web-probe -- curl -s -m 5 -o /dev/null -w 'through the ingress controller -> HTTP %{http_code}\n' -H 'Host: incidentdesk.local' http://ingress-nginx-controller.ingress-nginx.svc/
+through the ingress controller -> HTTP 200
+
+$ s=$(date +%s); for i in $(seq 1 72); do p=$(kubectl -n incidentdesk get ingress incidentdesk -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.port.number}'); [ "$p" != 8080 ] && { echo "ingress port restored to $p after $(( $(date +%s)-s )) s"; break; }; sleep 5; done
+ingress port restored to  after 10 s
+
+$ sleep 10; kubectl exec web-probe -- curl -s -m 5 -o /dev/null -w 'through the ingress controller -> HTTP %{http_code}\n' -H 'Host: incidentdesk.local' http://ingress-nginx-controller.ingress-nginx.svc/
+through the ingress controller -> HTTP 200
+
+$ kubectl -n argocd get events --field-selector involvedObject.name=incidentdesk-dev --sort-by=.lastTimestamp -o custom-columns=TIME:.lastTimestamp,MESSAGE:.message | tail -6 | cut -c1-150
+2026-10-08T18:44:24Z   Partial sync operation to a5b51ecaf539753e33acc826c6d1bee86ddac2ef succeeded
+2026-10-08T18:44:24Z   Updated sync status: OutOfSync -> Synced
+2026-10-08T18:44:35Z   Initiated automated sync to 'a5b51ecaf539753e33acc826c6d1bee86ddac2ef'
+2026-10-08T18:44:35Z   Updated sync status: Synced -> OutOfSync
+2026-10-08T18:44:36Z   Partial sync operation to a5b51ecaf539753e33acc826c6d1bee86ddac2ef succeeded
+2026-10-08T18:44:36Z   Updated sync status: OutOfSync -> Synced
+
+# GitOps turns "find who changed it and change it back" into "nothing to do": the cluster converges back to Git. The investigation still matters —
+# Argo CD events and the OutOfSync diff say WHAT drifted; the audit log says WHO.
+$ kubectl -n argocd get application incidentdesk-dev
+NAME               SYNC STATUS   HEALTH STATUS
+incidentdesk-dev   Synced        Healthy
+
+########## RE-RUN of fault 6 — the check above probed "/", which the Ingress sends to the FRONTEND; the patched rule is paths[0] = /api ##########
+
+$ kubectl -n incidentdesk get ingress incidentdesk -o jsonpath='{range .spec.rules[0].http.paths[*]}{.path} -> {.backend.service.name}:{.backend.service.port}{"\n"}{end}'
+/api -> incidentdesk-backend:{"name":"http"}
+/ -> incidentdesk-frontend:{"name":"http"}
+
+$ ing /api/incidents/stats
+ingress /api/incidents/stats -> HTTP 200
+
+$ kubectl -n incidentdesk patch ingress incidentdesk --type=json --patch-file '/Users/ashmit/Desktop/DEV OPs/devops-homework/20-final-devops-project/troubleshooting/06-ingress-port.patch.json' && kubectl -n incidentdesk get ingress incidentdesk -o jsonpath='{range .spec.rules[0].http.paths[*]}{.path} -> {.backend.service.name}:{.backend.service.port}{"\n"}{end}'
+ingress.networking.k8s.io/incidentdesk patched
+/api -> incidentdesk-backend:{"number":8080}
+/ -> incidentdesk-frontend:{"name":"http"}
+
+$ ing /api/incidents/stats; ing /
+ingress /api/incidents/stats -> HTTP 503
+ingress / -> HTTP 200
+
+$ kubectl -n incidentdesk get svc incidentdesk-backend -o jsonpath='backend Service ports: {.spec.ports}{"\n"}'
+backend Service ports: [{"name":"http","port":8000,"protocol":"TCP","targetPort":"http"}]
+
+# only /api breaks (502/503): the rule now points at port 8080, which the backend Service does not have. "/" still works.
+$ s=$(date +%s); for i in $(seq 1 72); do p=$(kubectl -n incidentdesk get ingress incidentdesk -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.port}'); case "$p" in *8080*) sleep 5;; *) echo "restored to $p after $(( $(date +%s)-s )) s"; break;; esac; done
+restored to {"name":"http"} after 15 s
+
+$ sleep 5; ing /api/incidents/stats
+ingress /api/incidents/stats -> HTTP 200
+

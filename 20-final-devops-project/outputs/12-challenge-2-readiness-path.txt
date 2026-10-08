@@ -1,0 +1,160 @@
+########## CHALLENGE 2 — "a probe tidy-up renamed the readiness endpoint" ##########
+
+# BEFORE
+$ kubectl -n argocd get application incidentdesk-dev
+NAME               SYNC STATUS   HEALTH STATUS
+incidentdesk-dev   Synced        Healthy
+
+$ kubectl -n incidentdesk get pods
+NAME                                    READY   STATUS    RESTARTS      AGE
+incidentdesk-backend-858d7fbb8b-29kcq   1/1     Running   0             5m9s
+incidentdesk-backend-858d7fbb8b-nfp9r   1/1     Running   0             12m
+incidentdesk-frontend-765f5c78f-tkjmh   1/1     Running   0             12m
+incidentdesk-postgres-0                 1/1     Running   7 (29m ago)   11h
+
+$ api
+frontend /api/incidents -> HTTP 000
+command terminated with exit code 28
+
+$ git -C '/private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs/8b2e1c1b-ed8f-4fa3-af5d-680f36b7d8a9/scratchpad/gitops-wt' show HEAD | grep -E '^[-+] .*path'
+-    startup: { path: /health, periodSeconds: 3, failureThreshold: 60 }
+-    readiness: { path: /ready, periodSeconds: 5, timeoutSeconds: 5, failureThreshold: 3 }
+-    liveness: { path: /health, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 6 }
++      path: /health
++      path: /readyz
++      path: /health
+
+# OBSERVE
+$ kubectl -n argocd get application incidentdesk-dev
+NAME               SYNC STATUS   HEALTH STATUS
+incidentdesk-dev   Unknown       Progressing
+
+$ kubectl -n incidentdesk get pods -o wide
+NAME                                    READY   STATUS    RESTARTS        AGE   IP             NODE       NOMINATED NODE   READINESS GATES
+incidentdesk-backend-858d7fbb8b-29kcq   0/1     Running   2 (2m31s ago)   13m   10.244.0.157   minikube   <none>           <none>
+incidentdesk-backend-858d7fbb8b-nfp9r   0/1     Running   2 (2m32s ago)   20m   10.244.0.155   minikube   <none>           <none>
+incidentdesk-frontend-765f5c78f-tkjmh   1/1     Running   0               20m   10.244.0.156   minikube   <none>           <none>
+incidentdesk-postgres-0                 1/1     Running   7 (37m ago)     11h   10.244.0.130   minikube   <none>           <none>
+
+$ api
+frontend /api/incidents -> HTTP 502
+
+# INVESTIGATE
+$ kubectl -n incidentdesk describe pod -l app.kubernetes.io/component=backend | grep -E 'Readiness|Unhealthy' | tail -3 | cut -c1-200
+    Readiness:  http-get http://:http/ready delay=0s timeout=5s period=5s #success=1 #failure=3
+    Readiness:  http-get http://:http/ready delay=0s timeout=5s period=5s #success=1 #failure=3
+
+$ kubectl -n incidentdesk exec deploy/incidentdesk-backend -- python3 -c "import urllib.request as u
+for p in ('/ready','/readyz'):
+    try: print(p, u.urlopen('http://127.0.0.1:8000'+p).status)
+    except Exception as e: print(p, e)"
+Defaulted container "backend" out of: backend, wait-for-db (init), migrate (init)
+command terminated with exit code 137
+
+$ kubectl -n incidentdesk get endpointslices -l kubernetes.io/service-name=incidentdesk-backend -o jsonpath='{range .items[*].endpoints[*]}{.addresses[0]} ready={.conditions.ready}{"\n"}{end}'
+10.244.0.155 ready=false
+10.244.0.157 ready=false
+
+# ROOT CAUSE: the app serves /ready; the probe asks for /readyz -> 404 -> the new pod never becomes Ready. RollingUpdate keeps the OLD pod serving, so
+# users are fine for now — but the rollout is stuck, Argo CD reports the app Progressing/Degraded, and the next deploy would pile up behind it.
+# VERIFY
+$ kubectl -n argocd get application incidentdesk-dev
+NAME               SYNC STATUS   HEALTH STATUS
+incidentdesk-dev   Synced        Healthy
+
+$ kubectl -n incidentdesk get pods
+NAME                                    READY   STATUS    RESTARTS        AGE
+incidentdesk-backend-858d7fbb8b-29kcq   1/1     Running   4 (2m45s ago)   21m
+incidentdesk-backend-858d7fbb8b-nfp9r   1/1     Running   4 (2m42s ago)   29m
+incidentdesk-frontend-765f5c78f-tkjmh   1/1     Running   0               29m
+incidentdesk-postgres-0                 1/1     Running   7 (45m ago)     11h
+
+$ api
+frontend /api/incidents -> HTTP 200
+
+########## RE-RUN — the first attempt above was compromised: its BEFORE already showed HTTP 000 (backends unready from host load, not from the fault) ##########
+
+# BEFORE (cluster calm this time)
+$ kubectl -n argocd get application incidentdesk-dev
+NAME               SYNC STATUS   HEALTH STATUS
+incidentdesk-dev   Synced        Healthy
+
+$ kubectl -n incidentdesk get pods
+NAME                                    READY   STATUS    RESTARTS      AGE
+incidentdesk-backend-858d7fbb8b-dkxgh   1/1     Running   0             9m57s
+incidentdesk-backend-858d7fbb8b-xxb99   1/1     Running   0             6m11s
+incidentdesk-frontend-765f5c78f-tkjmh   1/1     Running   0             44m
+incidentdesk-postgres-0                 1/1     Running   7 (60m ago)   11h
+
+$ api
+frontend /api/incidents -> HTTP 200
+
+$ git -C '/private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs/8b2e1c1b-ed8f-4fa3-af5d-680f36b7d8a9/scratchpad/gitops-wt' show HEAD | grep -E '^[-+] .*ready'
+-    readiness: { path: /ready, periodSeconds: 5, timeoutSeconds: 5, failureThreshold: 3 }
++      path: /readyz
+
+# OBSERVE
+$ kubectl -n argocd get application incidentdesk-dev
+NAME               SYNC STATUS   HEALTH STATUS
+incidentdesk-dev   Synced        Progressing
+
+$ kubectl -n incidentdesk get pods -o wide
+NAME                                    READY   STATUS    RESTARTS      AGE    IP             NODE       NOMINATED NODE   READINESS GATES
+incidentdesk-backend-7c59fdd8db-9kqsx   0/1     Running   0             105s   10.244.0.166   minikube   <none>           <none>
+incidentdesk-backend-858d7fbb8b-dkxgh   1/1     Running   0             11m    10.244.0.163   minikube   <none>           <none>
+incidentdesk-backend-858d7fbb8b-xxb99   1/1     Running   0             8m9s   10.244.0.164   minikube   <none>           <none>
+incidentdesk-frontend-765f5c78f-tkjmh   1/1     Running   0             46m    10.244.0.156   minikube   <none>           <none>
+incidentdesk-postgres-0                 1/1     Running   7 (62m ago)   11h    10.244.0.130   minikube   <none>           <none>
+
+$ api
+frontend /api/incidents -> HTTP 200
+
+# INVESTIGATE
+$ kubectl -n incidentdesk get pods -l app.kubernetes.io/component=backend -o custom-columns=POD:.metadata.name,READY:.status.containerStatuses[0].ready,IMAGE-HASH:.metadata.labels.pod-template-hash
+POD                                     READY   IMAGE-HASH
+incidentdesk-backend-7c59fdd8db-9kqsx   false   7c59fdd8db
+incidentdesk-backend-858d7fbb8b-dkxgh   true    858d7fbb8b
+incidentdesk-backend-858d7fbb8b-xxb99   true    858d7fbb8b
+
+$ kubectl -n incidentdesk get events --sort-by=.lastTimestamp | grep -E 'Readiness probe failed' | tail -2 | cut -c1-190
+5m54s       Warning   Unhealthy                      pod/incidentdesk-postgres-0                    Readiness probe failed: /var/run/postgresql:5432 - no response
+5m47s       Warning   Unhealthy                      pod/incidentdesk-backend-6bc8945c7d-zwf9v      Readiness probe failed: Get "http://10.244.0.161:8000/ready": context deadline exceeded (C
+
+$ kubectl -n incidentdesk exec $(kubectl -n incidentdesk get pod -l app.kubernetes.io/component=backend --sort-by=.metadata.creationTimestamp -o name | tail -1) -c backend -- python3 -c "import urllib.request as u
+for p in ('/ready','/readyz'):
+    try: print(p, u.urlopen('http://127.0.0.1:8000'+p).status)
+    except Exception as e: print(p, e)"
+/ready 200
+/readyz HTTP Error 404: Not Found
+
+$ kubectl -n incidentdesk get endpointslices -l kubernetes.io/service-name=incidentdesk-backend -o jsonpath='{range .items[*].endpoints[*]}{.targetRef.name} ready={.conditions.ready}{"\n"}{end}'
+incidentdesk-backend-858d7fbb8b-xxb99 ready=true
+incidentdesk-backend-858d7fbb8b-dkxgh ready=true
+incidentdesk-backend-7c59fdd8db-9kqsx ready=false
+
+$ kubectl -n argocd get application incidentdesk-dev -o jsonpath='{range .status.resources[?(@.kind=="Deployment")]}{.name}: {.health.status} {.health.message}{"\n"}{end}'
+incidentdesk-backend:  
+incidentdesk-frontend:  
+
+# ROOT CAUSE: the app serves /ready; the new pod is probed on /readyz -> 404 -> never Ready. RollingUpdate keeps the old pods in the endpoints, so users
+# are still served (see the HTTP code above), but the rollout is stuck and Argo CD reports it. FIX: git revert.
+# VERIFY
+$ git -C '/private/tmp/claude-501/-Users-ashmit-Desktop-DEV-OPs/8b2e1c1b-ed8f-4fa3-af5d-680f36b7d8a9/scratchpad/gitops-wt' log -2 --format='%h %s'
+4d5aedc Revert "challenge 2 (re-run): rename the backend readiness path to /readyz"
+f0ab238 challenge 2 (re-run): rename the backend readiness path to /readyz
+
+$ kubectl -n argocd get application incidentdesk-dev
+NAME               SYNC STATUS   HEALTH STATUS
+incidentdesk-dev   Synced        Healthy
+
+$ kubectl -n incidentdesk get pods
+NAME                                    READY   STATUS        RESTARTS      AGE
+incidentdesk-backend-7c59fdd8db-9kqsx   0/1     Terminating   0             2m41s
+incidentdesk-backend-858d7fbb8b-dkxgh   1/1     Running       0             12m
+incidentdesk-backend-858d7fbb8b-xxb99   1/1     Running       0             9m5s
+incidentdesk-frontend-765f5c78f-tkjmh   1/1     Running       0             46m
+incidentdesk-postgres-0                 1/1     Running       7 (63m ago)   11h
+
+$ api
+frontend /api/incidents -> HTTP 200
+

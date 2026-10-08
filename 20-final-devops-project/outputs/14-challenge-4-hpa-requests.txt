@@ -1,0 +1,51 @@
+########## CHALLENGE 4 — "the backend was throttled, so we removed its CPU request and limit" ##########
+
+# BEFORE
+$ kubectl -n argocd get application incidentdesk-dev
+NAME               SYNC STATUS   HEALTH STATUS
+incidentdesk-dev   Synced        Healthy
+
+$ kubectl -n incidentdesk get pods
+NAME                                    READY   STATUS    RESTARTS        AGE
+incidentdesk-backend-858d7fbb8b-29kcq   1/1     Running   4 (4m48s ago)   23m
+incidentdesk-backend-858d7fbb8b-nfp9r   1/1     Running   4 (4m45s ago)   31m
+incidentdesk-frontend-765f5c78f-tkjmh   1/1     Running   0               31m
+incidentdesk-postgres-0                 1/1     Running   7 (48m ago)     11h
+
+$ api
+frontend /api/incidents -> HTTP 200
+
+$ kubectl -n incidentdesk get hpa
+NAME                   REFERENCE                         TARGETS         MINPODS   MAXPODS   REPLICAS   AGE
+incidentdesk-backend   Deployment/incidentdesk-backend   cpu: 112%/60%   1         2         2          11h
+
+# OBSERVE
+$ kubectl -n incidentdesk get hpa
+NAME                   REFERENCE                         TARGETS        MINPODS   MAXPODS   REPLICAS   AGE
+incidentdesk-backend   Deployment/incidentdesk-backend   cpu: 98%/60%   1         2         2          11h
+
+$ kubectl -n incidentdesk get deploy incidentdesk-backend -o jsonpath='{.spec.template.spec.containers[0].resources}{"\n"}'
+{"limits":{"memory":"256Mi"}}
+
+# INVESTIGATE
+$ kubectl -n incidentdesk describe hpa | grep -E 'FailedGetResourceMetric|missing request|ScalingActive' | tail -3 | cut -c1-200
+  ScalingActive   True    ValidMetricFound    the HPA was able to successfully calculate a replica count from cpu resource utilization (percentage of request)
+  Warning  FailedGetResourceMetric       9m10s (x174 over 9h)  horizontal-pod-autoscaler  failed to get cpu utilization: unable to get metrics for resource cpu: unable to fetch metrics from resource m
+
+$ kubectl -n incidentdesk get limitrange incidentdesk-defaults -o jsonpath='{.spec.limits[0]}{"\n"}'
+{"default":{"cpu":"1","memory":"256Mi"},"defaultRequest":{"cpu":"50m","memory":"64Mi"},"max":{"cpu":"1","memory":"1Gi"},"type":"Container"}
+
+# ROOT CAUSE: CPU utilisation is measured as a percentage of the CPU REQUEST. With the request removed the HPA cannot compute utilisation.
+# (Here the namespace LimitRange from Terraform injects a default request, so check which way it went above — that is exactly what LimitRange is for.)
+# VERIFY
+$ kubectl -n incidentdesk get hpa
+NAME                   REFERENCE                         TARGETS         MINPODS   MAXPODS   REPLICAS   AGE
+incidentdesk-backend   Deployment/incidentdesk-backend   cpu: 264%/60%   1         2         2          11h
+
+$ kubectl -n argocd get application incidentdesk-dev
+NAME               SYNC STATUS   HEALTH STATUS
+incidentdesk-dev   Synced        Healthy
+
+$ api
+frontend /api/incidents -> HTTP 200
+

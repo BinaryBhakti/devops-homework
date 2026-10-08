@@ -1,0 +1,61 @@
+########## CHALLENGE 3 — "a release pinned a backend image tag by hand" ##########
+
+# BEFORE
+$ kubectl -n argocd get application incidentdesk-dev
+NAME               SYNC STATUS   HEALTH STATUS
+incidentdesk-dev   Synced        Healthy
+
+$ kubectl -n incidentdesk get pods
+NAME                                    READY   STATUS    RESTARTS        AGE
+incidentdesk-backend-858d7fbb8b-29kcq   1/1     Running   4 (2m47s ago)   21m
+incidentdesk-backend-858d7fbb8b-nfp9r   1/1     Running   4 (2m44s ago)   29m
+incidentdesk-frontend-765f5c78f-tkjmh   1/1     Running   0               29m
+incidentdesk-postgres-0                 1/1     Running   7 (46m ago)     11h
+
+$ api
+frontend /api/incidents -> HTTP 200
+
+# OBSERVE
+$ kubectl -n argocd get application incidentdesk-dev
+NAME               SYNC STATUS   HEALTH STATUS
+incidentdesk-dev   Synced        Progressing
+
+$ kubectl -n incidentdesk get pods
+NAME                                    READY   STATUS              RESTARTS       AGE
+incidentdesk-backend-79c6f57ff8-wb8nw   0/1     Init:ErrImagePull   0              60s
+incidentdesk-backend-858d7fbb8b-29kcq   1/1     Running             4 (4m8s ago)   23m
+incidentdesk-backend-858d7fbb8b-nfp9r   1/1     Running             4 (4m5s ago)   30m
+incidentdesk-frontend-765f5c78f-tkjmh   1/1     Running             0              30m
+incidentdesk-postgres-0                 1/1     Running             7 (47m ago)    11h
+
+$ api
+frontend /api/incidents -> HTTP 200
+
+# INVESTIGATE
+$ kubectl -n incidentdesk get pods -l app.kubernetes.io/component=backend -o jsonpath='{range .items[*]}{.metadata.name}: {.spec.containers[0].image} -> {.status.containerStatuses[0].state.waiting.reason}{.status.containerStatuses[0].state.running.startedAt}{"\n"}{end}'
+incidentdesk-backend-79c6f57ff8-wb8nw: ghcr.io/binarybhakti/incidentdesk-backend:sha-1a2b3c4 -> PodInitializing
+incidentdesk-backend-858d7fbb8b-29kcq: ghcr.io/binarybhakti/incidentdesk-backend:sha-212269d -> 2026-10-08T18:28:56Z
+incidentdesk-backend-858d7fbb8b-nfp9r: ghcr.io/binarybhakti/incidentdesk-backend:sha-212269d -> 2026-10-08T18:28:58Z
+
+$ kubectl -n incidentdesk describe pod -l app.kubernetes.io/component=backend | grep -E 'Failed to pull' | tail -1 | cut -c1-220
+
+$ kubectl -n argocd get application incidentdesk-dev -o jsonpath='{range .status.resources[?(@.kind=="Deployment")]}{.name}: {.health.status} {.health.message}{"\n"}{end}'
+incidentdesk-backend:  
+incidentdesk-frontend:  
+
+# ROOT CAUSE: sha-1a2b3c4 was never built or pushed — every image tag CI publishes is a commit SHA it pushed to GHCR. A hand-typed tag bypasses that.
+# VERIFY
+$ kubectl -n argocd get application incidentdesk-dev
+NAME               SYNC STATUS   HEALTH STATUS
+incidentdesk-dev   Synced        Healthy
+
+$ kubectl -n incidentdesk get pods
+NAME                                    READY   STATUS    RESTARTS        AGE
+incidentdesk-backend-858d7fbb8b-29kcq   1/1     Running   4 (4m46s ago)   23m
+incidentdesk-backend-858d7fbb8b-nfp9r   1/1     Running   4 (4m43s ago)   31m
+incidentdesk-frontend-765f5c78f-tkjmh   1/1     Running   0               31m
+incidentdesk-postgres-0                 1/1     Running   7 (48m ago)     11h
+
+$ api
+frontend /api/incidents -> HTTP 200
+
