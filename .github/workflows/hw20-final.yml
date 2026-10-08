@@ -15,11 +15,19 @@ on:
     paths:
       - "20-final-devops-project/**"
       - ".github/workflows/hw20-final.yml"
+      # evidence and docs are not deployable: don't build, scan and roll out for them
+      - "!20-final-devops-project/outputs/**"
+      - "!20-final-devops-project/screenshots/**"
+      - "!20-final-devops-project/**/*.md"
   pull_request:
     branches: [main]
     paths:
       - "20-final-devops-project/**"
       - ".github/workflows/hw20-final.yml"
+      # evidence and docs are not deployable: don't build, scan and roll out for them
+      - "!20-final-devops-project/outputs/**"
+      - "!20-final-devops-project/screenshots/**"
+      - "!20-final-devops-project/**/*.md"
   workflow_dispatch:
 
 concurrency:
