@@ -1,0 +1,18 @@
+# Remote state, once the bucket/table above exist (chicken-and-egg: the first apply uses local
+# state, then `terraform init -migrate-state` moves it here). Rename to backend.tf to use.
+terraform {
+  backend "s3" {
+    bucket         = "incidentdesk-dev-tfstate"
+    key            = "incidentdesk/dev/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "incidentdesk-dev-tf-lock"
+    encrypt        = true
+    # LocalStack only:
+    endpoints                   = { s3 = "http://localhost:4566", dynamodb = "http://localhost:4566", sts = "http://localhost:4566" }
+    use_path_style              = true
+    skip_credentials_validation = true
+    skip_requesting_account_id  = true
+    access_key                  = "test"
+    secret_key                  = "test"
+  }
+}
