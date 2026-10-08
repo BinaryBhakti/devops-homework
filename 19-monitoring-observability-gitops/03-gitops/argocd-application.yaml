@@ -9,8 +9,8 @@ spec:
   project: default
   source:
     repoURL: https://github.com/BinaryBhakti/devops-homework.git
-    targetRevision: main
-    path: 19-monitoring-observability-gitops/03-gitops/app
+    targetRevision: gitops-config     # small orphan branch: manifests only (see README)
+    path: app
   destination:
     server: https://kubernetes.default.svc
     namespace: session20

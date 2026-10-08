@@ -1,0 +1,164 @@
+########## TASK 3 — GitOps in action: Git is the only way in ##########
+
+# all git commands below run in a checkout of the gitops-config branch (the only thing Argo CD watches)
+$ git branch --show-current && git log --oneline -3
+gitops-config
+ccc84c9 gitops-config: desired state for the GitOps demo (namespace, configmap, deployment, service)
+
+$ kubectl -n argocd get application gitops-demo
+NAME          SYNC STATUS   HEALTH STATUS
+gitops-demo   Synced        Healthy
+
+$ kubectl -n session20 get deploy gitops-demo
+NAME          READY   UP-TO-DATE   AVAILABLE   AGE
+gitops-demo   2/2     2            2           69s
+
+$ page
+gitops-demo v1 — deployed by Argo CD from Git
+
+# 1. A RELEASE IS A COMMIT — 2 -> 3 replicas and a new page, changed only in Git
+$ git diff --stat; git diff app | grep -E '^[-+] ' 
+ app/configmap.yaml  | 2 +-
+ app/deployment.yaml | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+-    gitops-demo v1 — deployed by Argo CD from Git
++    gitops-demo v2 — a new release, shipped by a git push
+-  replicas: 2
++  replicas: 3
+-        page-version: "v1"          # bumped with the page so a content change rolls the pods
++        page-version: "v2"          # bumped with the page so a content change rolls the pods
+
+$ git commit -qam 'GitOps demo: release v2 (3 replicas, new page)' && git push -q origin gitops-config && git log -1 --format='%h %s'
+62bfe8c GitOps demo: release v2 (3 replicas, new page)
+
+# Argo polls Git every 3 minutes by default; a refresh annotation asks it to look now (a webhook from GitHub does the same in production)
+$ kubectl -n argocd get application gitops-demo -o jsonpath='synced to: {.status.sync.revision}{"\n"}status:    {.status.sync.status} / {.status.health.status}{"\n"}'
+synced to: 62bfe8c7ccdaa1def01f0a9793689e42b632055a
+status:    Synced / Healthy
+
+$ echo "git HEAD:  $(git rev-parse HEAD)"
+git HEAD:  62bfe8c7ccdaa1def01f0a9793689e42b632055a
+
+$ kubectl -n session20 rollout status deploy/gitops-demo --timeout=120s && kubectl -n session20 get deploy gitops-demo
+deployment "gitops-demo" successfully rolled out
+NAME          READY   UP-TO-DATE   AVAILABLE   AGE
+gitops-demo   3/3     3            3           93s
+
+$ page
+gitops-demo v2 — a new release, shipped by a git push
+
+$ kubectl -n argocd get application gitops-demo -o jsonpath='{range .status.history[*]}{.id}  {.revision}  {.deployedAt}{"\n"}{end}'
+0  ccc84c9001f5f8bcdddadb814371ce9a2d3054ed  2026-10-08T03:48:40Z
+1  62bfe8c7ccdaa1def01f0a9793689e42b632055a  2026-10-08T03:50:01Z
+
+# 2. DRIFT + SELF-HEAL — someone scales the Deployment by hand
+$ kubectl -n session20 scale deploy gitops-demo --replicas=6
+deployment.apps/gitops-demo scaled
+
+$ kubectl -n session20 get deploy gitops-demo
+NAME          READY   UP-TO-DATE   AVAILABLE   AGE
+gitops-demo   3/6     3            3           94s
+
+$ sleep 15; kubectl -n session20 get deploy gitops-demo
+NAME          READY   UP-TO-DATE   AVAILABLE   AGE
+gitops-demo   6/6     6            6           109s
+
+$ kubectl -n argocd get events --field-selector involvedObject.name=gitops-demo --sort-by=.lastTimestamp -o custom-columns=TIME:.lastTimestamp,MESSAGE:.message | tail -4 | cut -c1-170
+2026-10-08T03:49:59Z   Initiated automated sync to '62bfe8c7ccdaa1def01f0a9793689e42b632055a'
+2026-10-08T03:49:59Z   Updated sync status: Synced -> OutOfSync
+2026-10-08T03:50:01Z   Sync operation to 62bfe8c7ccdaa1def01f0a9793689e42b632055a succeeded
+2026-10-08T03:50:12Z   Updated sync status: OutOfSync -> Synced
+
+# and someone edits the ConfigMap directly
+$ kubectl -n session20 patch configmap gitops-demo-page --type merge -p '{"data":{"index.html":"hot-fixed by hand on the cluster\n"}}' && kubectl -n session20 get configmap gitops-demo-page -o jsonpath='{.data.index\.html}'
+configmap/gitops-demo-page patched
+hot-fixed by hand on the cluster
+
+$ sleep 15; kubectl -n session20 get configmap gitops-demo-page -o jsonpath='{.data.index\.html}'
+hot-fixed by hand on the cluster
+
+# 3. SOMETHING IS DELETED — the Service disappears
+$ kubectl -n session20 delete svc gitops-demo && kubectl -n session20 get svc
+service "gitops-demo" deleted from session20 namespace
+No resources found in session20 namespace.
+
+$ sleep 15; kubectl -n session20 get svc
+No resources found in session20 namespace.
+
+# 4. PRUNE — a resource added to Git appears; removed from Git, it is deleted from the cluster
+$ git add app/feature-flags.yaml && git commit -qm 'GitOps demo: add a feature-flags ConfigMap' && git push -q origin gitops-config && git log -1 --format='%h %s'
+fc8c090 GitOps demo: add a feature-flags ConfigMap
+
+$ kubectl -n session20 get configmap feature-flags
+NAME            DATA   AGE
+feature-flags   1      6s
+
+$ git rm -q app/feature-flags.yaml && git commit -qm 'GitOps demo: remove the feature-flags ConfigMap' && git push -q origin gitops-config && git log -1 --format='%h %s'
+6f07346 GitOps demo: remove the feature-flags ConfigMap
+
+$ kubectl -n session20 get configmap feature-flags
+Error from server (NotFound): configmaps "feature-flags" not found
+
+# 5. ROLLBACK IS git revert — undo release v2 by reverting its commit
+$ git revert --no-edit 62bfe8c7ccdaa1def01f0a9793689e42b632055a >/dev/null && git push -q origin gitops-config && git log -2 --format='%h %s'
+0a292c9 Revert "GitOps demo: release v2 (3 replicas, new page)"
+6f07346 GitOps demo: remove the feature-flags ConfigMap
+
+$ kubectl -n session20 rollout status deploy/gitops-demo --timeout=120s && kubectl -n session20 get deploy gitops-demo
+deployment "gitops-demo" successfully rolled out
+NAME          READY   UP-TO-DATE   AVAILABLE   AGE
+gitops-demo   2/2     2            2           27m
+
+$ page
+gitops-demo v1 — deployed by Argo CD from Git
+
+$ kubectl -n argocd get application gitops-demo -o jsonpath='{range .status.history[*]}{.id}  {.revision}  {.deployedAt}{"\n"}{end}'
+0  ccc84c9001f5f8bcdddadb814371ce9a2d3054ed  2026-10-08T03:48:40Z
+1  62bfe8c7ccdaa1def01f0a9793689e42b632055a  2026-10-08T03:50:01Z
+2  fc8c0903e1764f2fd9d3a7b5f9562f7f4786cd64  2026-10-08T03:54:15Z
+3  6f07346bd16ac4e5bcc25deff021976e077c7ead  2026-10-08T03:54:30Z
+4  0a292c9fcd321fe840f612b37ce681e60e3afe81  2026-10-08T03:54:42Z
+
+$ kubectl -n argocd get application gitops-demo
+NAME          SYNC STATUS   HEALTH STATUS
+gitops-demo   Synced        Healthy
+
+########## FOLLOW-UP — the 15 s checks above were too short for the ConfigMap edit and the Service deletion. Measure how long self-heal really takes ##########
+
+$ kubectl -n argocd get application gitops-demo -o jsonpath="{.spec.syncPolicy}{\"\n\"}"
+{"automated":{"prune":true,"selfHeal":true},"syncOptions":["CreateNamespace=true"]}
+
+# drift 1: delete the Service, then poll every 5 s
+$ kubectl -n session20 delete svc gitops-demo; s=$(date +%s); for i in $(seq 1 60); do kubectl -n session20 get svc gitops-demo >/dev/null 2>&1 && { echo "Service back after $(( $(date +%s)-s )) s"; break; }; sleep 5; done; kubectl -n session20 get svc
+service "gitops-demo" deleted from session20 namespace
+Service back after 6 s
+NAME          TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+gitops-demo   ClusterIP   10.100.97.174   <none>        80/TCP    5s
+
+# drift 2: edit the ConfigMap by hand, then poll every 5 s
+$ kubectl -n session20 patch configmap gitops-demo-page --type merge -p '{"data":{"index.html":"hot-fixed by hand on the cluster\n"}}' >/dev/null; s=$(date +%s); for i in $(seq 1 60); do v=$(kubectl -n session20 get configmap gitops-demo-page -o jsonpath='{.data.index\.html}'); case "$v" in *hot-fixed*) sleep 5;; *) echo "ConfigMap reverted after $(( $(date +%s)-s )) s: $v"; break;; esac; done
+ConfigMap reverted after 5 s: gitops-demo v1 — deployed by Argo CD from Git
+
+$ kubectl -n argocd get events --field-selector involvedObject.name=gitops-demo --sort-by=.lastTimestamp -o custom-columns=TIME:.lastTimestamp,MESSAGE:.message | tail -6 | cut -c1-150
+2026-10-08T04:17:18Z   Partial sync operation to 0a292c9fcd321fe840f612b37ce681e60e3afe81 succeeded
+2026-10-08T04:17:18Z   Updated sync status: OutOfSync -> Synced
+2026-10-08T04:17:23Z   Initiated automated sync to '0a292c9fcd321fe840f612b37ce681e60e3afe81'
+2026-10-08T04:17:23Z   Updated sync status: Synced -> OutOfSync
+2026-10-08T04:17:24Z   Partial sync operation to 0a292c9fcd321fe840f612b37ce681e60e3afe81 succeeded
+2026-10-08T04:17:24Z   Updated sync status: OutOfSync -> Synced
+
+# self-heal is not instant: Argo CD notices drift on its next reconciliation and, in v3, backs off between repeated self-heals of the same app
+# (the scale-to-6 at the start was the first drift and was reverted within 15 s; drifts that follow it in quick succession wait longer).
+# CORRECTION to the two notes just above: the scale-to-6 in step 2 was NOT reverted within 15 s — the transcript shows 6/6, and the events
+# listed under it belong to the v2 release sync seconds earlier. In the first pass, none of the three drifts was corrected inside the 15 s windows.
+# drift 3, measured properly: scale by hand, then poll every 5 s
+$ kubectl -n session20 scale deploy gitops-demo --replicas=6 >/dev/null; s=$(date +%s); for i in $(seq 1 60); do r=$(kubectl -n session20 get deploy gitops-demo -o jsonpath="{.spec.replicas}"); [ "$r" = 2 ] && { echo "spec.replicas back to 2 after $(( $(date +%s)-s )) s"; break; }; sleep 5; done; kubectl -n session20 get deploy gitops-demo
+spec.replicas back to 2 after 186 s
+NAME          READY   UP-TO-DATE   AVAILABLE   AGE
+gitops-demo   2/2     2            2           85m
+
+$ kubectl -n argocd get events --field-selector involvedObject.name=gitops-demo --sort-by=.lastTimestamp -o custom-columns=TIME:.lastTimestamp,MESSAGE:.message | tail -3 | cut -c1-150
+2026-10-08T05:13:47Z   Initiated automated sync to '0a292c9fcd321fe840f612b37ce681e60e3afe81'
+2026-10-08T05:13:47Z   Updated sync status: Synced -> OutOfSync
+2026-10-08T05:13:48Z   Partial sync operation to 0a292c9fcd321fe840f612b37ce681e60e3afe81 succeeded
+

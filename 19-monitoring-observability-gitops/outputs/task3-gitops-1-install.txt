@@ -1,0 +1,149 @@
+########## TASK 3 — GitOps with Argo CD: install and first sync ##########
+
+# install Argo CD (the stable manifest the course uses), then switch off the optional parts this lab does not need — the cluster is small
+$ kubectl create namespace argocd
+namespace/argocd created
+
+$ kubectl apply -n argocd --server-side --force-conflicts -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml | tail -5
+networkpolicy.networking.k8s.io/argocd-dex-server-network-policy serverside-applied
+networkpolicy.networking.k8s.io/argocd-notifications-controller-network-policy serverside-applied
+networkpolicy.networking.k8s.io/argocd-redis-network-policy serverside-applied
+networkpolicy.networking.k8s.io/argocd-repo-server-network-policy serverside-applied
+networkpolicy.networking.k8s.io/argocd-server-network-policy serverside-applied
+
+$ kubectl -n argocd scale deploy argocd-dex-server argocd-notifications-controller argocd-applicationset-controller --replicas=0
+deployment.apps/argocd-dex-server scaled
+deployment.apps/argocd-notifications-controller scaled
+deployment.apps/argocd-applicationset-controller scaled
+
+$ kubectl -n argocd rollout status deploy/argocd-server --timeout=300s && kubectl -n argocd rollout status deploy/argocd-repo-server --timeout=300s && kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=300s
+Waiting for deployment "argocd-server" rollout to finish: 0 of 1 updated replicas are available...
+deployment "argocd-server" successfully rolled out
+deployment "argocd-repo-server" successfully rolled out
+partitioned roll out complete: 1 new pods have been updated...
+
+$ kubectl -n argocd get pods
+NAME                                 READY   STATUS    RESTARTS   AGE
+argocd-application-controller-0      1/1     Running   0          77s
+argocd-redis-bdbdffcb4-26qjw         1/1     Running   0          79s
+argocd-repo-server-d89c7967d-f449x   1/1     Running   0          79s
+argocd-server-776b7cdd4d-sqtkj       1/1     Running   0          79s
+
+$ kubectl -n argocd get deploy argocd-server -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+quay.io/argoproj/argocd:v3.5.4
+
+# register the app: Git repo + path = desired state, this cluster + namespace = destination
+$ cat argocd-application.yaml
+# Applied once, by hand, from an admin shell. It lives OUTSIDE app/ on purpose: Argo CD
+# watches app/, and an Application that manages itself is a different (app-of-apps) pattern.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gitops-demo
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/BinaryBhakti/devops-homework.git
+    targetRevision: main
+    path: 19-monitoring-observability-gitops/03-gitops/app
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: session20
+  syncPolicy:
+    automated:
+      prune: true        # delete what was removed from Git
+      selfHeal: true     # undo changes made outside Git
+    syncOptions:
+      - CreateNamespace=true
+
+$ kubectl apply -f argocd-application.yaml
+application.argoproj.io/gitops-demo created
+
+$ for i in $(seq 1 30); do s=$(kubectl -n argocd get application gitops-demo -o jsonpath='{.status.sync.status}/{.status.health.status}'); [ "$s" = Synced/Healthy ] && break; sleep 5; done; kubectl -n argocd get application gitops-demo
+NAME          SYNC STATUS   HEALTH STATUS
+gitops-demo   Unknown       Healthy
+
+$ kubectl -n argocd get application gitops-demo -o jsonpath='revision: {.status.sync.revision}{"\n"}'
+revision: main
+
+$ git -C "$(git rev-parse --show-toplevel 2>/dev/null || echo .)" log -1 --format="git HEAD: %H %s" origin/main
+git HEAD: a83fecd56fe0eed2b5e72dda2796be7b1c828a31 Homework 19: GitOps app manifests and the Argo CD Application
+
+$ kubectl -n session20 get deploy,svc,configmap,pods
+No resources found in session20 namespace.
+
+$ kubectl -n session20 run probe --rm -i --quiet --restart=Never --image=curlimages/curl:8.11.1 -- curl -s http://gitops-demo
+Error from server (NotFound): namespaces "session20" not found
+
+########## TROUBLESHOOTING — the Application stayed "Unknown" and nothing was deployed ##########
+
+$ kubectl -n argocd get application gitops-demo -o jsonpath='{range .status.conditions[*]}{.type}: {.message}{"\n"}{end}' 2>/dev/null | head -1 || true
+
+# what was found, in order (each step is in the session notes behind this homework):
+#  1. repo-server log: "Could not resolve host: github.com" — intermittent; CoreDNS forwards to Docker Desktop DNS (192.168.65.254), which dropped queries when the host was under load
+#  2. with DNS fine: "rpc error: code = DeadlineExceeded" — the controller allows the repo-server 60 s per manifest request, git commands 90 s
+#  3. a manual clone inside the repo-server: "fetch-pack: unexpected disconnect while reading sideband packet" after ~120 s
+#  4. the cause under it all: this link downloads at ~0.5 MB/s, and the homework repo is ~70 MB of screenshots. A full clone cannot finish in time.
+# FIX: give Argo CD a small thing to clone — an orphan branch holding only the manifests — and ask for shallow clones (depth 1)
+$ git ls-remote --heads origin gitops-config
+ccc84c9001f5f8bcdddadb814371ce9a2d3054ed	refs/heads/gitops-config
+
+$ git show --stat --format="%h %s" origin/gitops-config | head -8
+ccc84c9 gitops-config: desired state for the GitOps demo (namespace, configmap, deployment, service)
+
+ README.md           |  9 +++++++++
+ app/configmap.yaml  |  9 +++++++++
+ app/deployment.yaml | 30 ++++++++++++++++++++++++++++++
+ app/namespace.yaml  |  4 ++++
+ app/service.yaml    |  8 ++++++++
+ 5 files changed, 60 insertions(+)
+
+$ cat repository-secret.yaml | grep -v "^#"
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-devops-homework
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  type: git
+  url: https://github.com/BinaryBhakti/devops-homework.git
+  depth: "1"
+
+$ grep -A3 'source:' argocd-application.yaml
+  source:
+    repoURL: https://github.com/BinaryBhakti/devops-homework.git
+    targetRevision: gitops-config     # small orphan branch: manifests only (see README)
+    path: app
+
+$ kubectl apply -f repository-secret.yaml -f argocd-application.yaml
+secret/repo-devops-homework configured
+application.argoproj.io/gitops-demo unchanged
+
+$ kubectl -n argocd get application gitops-demo
+NAME          SYNC STATUS   HEALTH STATUS
+gitops-demo   Synced        Healthy
+
+$ kubectl -n argocd get application gitops-demo -o jsonpath='synced revision: {.status.sync.revision}{"\n"}'; echo "gitops-config HEAD: $(git rev-parse origin/gitops-config)"
+synced revision: ccc84c9001f5f8bcdddadb814371ce9a2d3054ed
+gitops-config HEAD: ccc84c9001f5f8bcdddadb814371ce9a2d3054ed
+
+$ kubectl -n session20 get deploy,svc,configmap gitops-demo gitops-demo-page 2>/dev/null; kubectl -n session20 get deploy,svc
+NAME                          READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/gitops-demo   2/2     2            2           39s
+
+NAME                  TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+service/gitops-demo   ClusterIP   10.96.204.156   <none>        80/TCP    39s
+
+NAME                         DATA   AGE
+configmap/gitops-demo-page   1      39s
+NAME                          READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/gitops-demo   2/2     2            2           39s
+
+NAME                  TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+service/gitops-demo   ClusterIP   10.96.204.156   <none>        80/TCP    39s
+
+$ kubectl -n session20 run probe --rm -i --quiet --restart=Never --image=curlimages/curl:8.11.1 -- curl -s http://gitops-demo
+
