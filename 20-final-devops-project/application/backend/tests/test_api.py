@@ -98,3 +98,10 @@ def test_metrics_endpoint_exposes_red_and_business_metrics(client):
     body = client.get("/metrics").text
     assert "http_requests_total" in body
     assert 'incidents_created_total{severity="SEV1"}' in body
+
+
+def test_no_cors_by_default(client):
+    """Same-origin only: without CORS_ORIGINS no Access-Control-Allow-Origin header is sent."""
+    r = client.get("/health", headers={"Origin": "https://evil.example"})
+    assert r.status_code == 200
+    assert "access-control-allow-origin" not in {k.lower() for k in r.headers}

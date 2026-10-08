@@ -15,7 +15,14 @@ from .models import Incident
 from .schemas import IncidentCreate, IncidentOut, IncidentUpdate, StatsOut, Status
 
 app = FastAPI(title=settings.app_name, version=settings.app_version)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+if _origins:  # no middleware at all when nothing is allowed — same-origin only
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_origins,
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=["Content-Type"],
+    )
 
 # RED metrics for every route (http_requests_total, http_request_duration_seconds) on /metrics.
 Instrumentator(excluded_handlers=["/metrics", "/health", "/ready"]).instrument(app).expose(
