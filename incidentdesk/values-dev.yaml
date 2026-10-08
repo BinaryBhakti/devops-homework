@@ -1,34 +1,43 @@
-# Local Minikube. Small, single replica, a throwaway database password.
 backend:
   replicas: 1
   probes:
-    # dev runs on a laptop node that is often CPU-starved: Python import + uvicorn start took
-    # longer than the default 60 s startup budget and the kubelet restarted it (startup probe
-    # "connection refused"). Same probe, bigger budget — 3 minutes.
-    startup: { path: /health, periodSeconds: 3, failureThreshold: 60 }
-    readiness: { path: /ready, periodSeconds: 5, timeoutSeconds: 5, failureThreshold: 3 }
-    liveness: { path: /health, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 6 }
+    startup:
+      path: /health
+      periodSeconds: 3
+      failureThreshold: 60
+    readiness:
+      path: /readyz
+      periodSeconds: 5
+      timeoutSeconds: 2
+      failureThreshold: 2
+    liveness:
+      path: /health
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 6
   resources:
-    requests: { cpu: 50m, memory: 96Mi }
-    limits: { cpu: 300m, memory: 256Mi }
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
   image:
-    tag: "sha-212269d"              # updated by the CI "gitops" job on every main build
+    tag: sha-212269d
 frontend:
   replicas: 1
   image:
-    tag: "sha-212269d"              # updated by the CI "gitops" job on every main build
+    tag: sha-212269d
 config:
   APP_ENV: dev
   LOG_LEVEL: debug
 postgres:
-  # DEV ONLY: a local, throwaway credential for a database that only exists inside Minikube.
-  # It protects nothing and is deliberately obvious. Real environments use existingSecret.
   password: local-dev-only
 hpa:
   enabled: true
   minReplicas: 1
-  maxReplicas: 2                     # the laptop node cannot start more Python pods at once
-  scaleUpStabilizationSeconds: 180   # ignore start-up CPU spikes on the laptop node
+  maxReplicas: 2
+  scaleUpStabilizationSeconds: 180
 pdb:
   enabled: false
 ingress:
