@@ -71,10 +71,15 @@ spec:
         - { name: run, emptyDir: { sizeLimit: 8Mi } }
         - { name: tmp, emptyDir: { sizeLimit: 64Mi } }
   volumeClaimTemplates:
-    - metadata:
+    # apiVersion/kind/volumeMode are what the API server defaults anyway; leaving them out made
+    # Argo CD report this StatefulSet OutOfSync forever (rendered spec != live spec).
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
         name: data
       spec:
         accessModes: [ReadWriteOnce]
+        volumeMode: Filesystem
         {{- with .Values.postgres.storageClassName }}
         storageClassName: {{ . }}
         {{- end }}
