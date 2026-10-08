@@ -6,4 +6,4 @@ metadata:
   namespace: session20
 data:
   index.html: |
-    gitops-demo v2 — a new release, shipped by a git push
+    gitops-demo v1 — deployed by Argo CD from Git
