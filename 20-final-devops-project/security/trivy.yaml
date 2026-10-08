@@ -1,0 +1,8 @@
+# trivy — image and filesystem scanning (SCA + OS packages + misconfiguration).
+severity: [HIGH, CRITICAL]
+scan:
+  scanners: [vuln, secret, misconfig]
+vulnerability:
+  ignore-unfixed: true      # a finding with no fixed version cannot be actioned by upgrading — tracked, not gated
+exit-code: 1
+# the ignore file is passed with --ignorefile (a path in here would be relative to the CWD, which differs between CI and local runs)

@@ -1,0 +1,20 @@
+# gitleaks — secret scanning. Extends the built-in ruleset (AWS keys, GitHub tokens, private
+# keys, generic API keys, ...) with one project rule and a deliberately narrow allowlist.
+title = "IncidentDesk gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "postgres-url-with-password"
+description = "PostgreSQL connection URL with an inline password"
+regex = '''postgres(?:ql)?(?:\+\w+)?://[^:\s/]+:([^@\s$]{6,})@'''
+secretGroup = 1
+keywords = ["postgres"]
+
+[allowlist]
+description = "Known, documented non-secrets"
+# The Compose/dev default "local-dev-only" protects a throwaway database inside the developer's
+# own machine and is documented as such. Anything else matching the rule above fails the scan.
+regexes = ['''local-dev-only''', '''change-me''', '''REPLACE_ME''']
+paths = ['''(^|/)outputs/''']   # captured lab transcripts, reviewed by hand

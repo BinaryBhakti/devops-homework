@@ -1,0 +1,28 @@
+# Project-specific SAST rules, run IN ADDITION to the community rulesets
+# (semgrep --config p/python --config p/dockerfile --config security/semgrep.yml).
+rules:
+  - id: fastapi-debug-enabled
+    languages: [python]
+    severity: ERROR
+    message: FastAPI/uvicorn debug or reload mode must not ship — it exposes tracebacks and reloads on file change.
+    pattern-either:
+      - pattern: FastAPI(..., debug=True, ...)
+      - pattern: uvicorn.run(..., reload=True, ...)
+  - id: sqlalchemy-raw-sql-with-fstring
+    languages: [python]
+    severity: ERROR
+    message: SQL built with an f-string is injectable — use bound parameters.
+    pattern-either:
+      - pattern: sqlalchemy.text(f"...")
+      - pattern: text(f"...")
+      - pattern: $DB.execute(f"...")
+  - id: subprocess-shell-true
+    languages: [python]
+    severity: ERROR
+    message: shell=True passes input through a shell — command injection risk.
+    pattern: subprocess.$FUNC(..., shell=True, ...)
+  - id: hardcoded-db-credentials
+    languages: [python]
+    severity: WARNING
+    message: Database URL with inline credentials — read it from the environment.
+    pattern-regex: postgres(?:ql)?(?:\+\w+)?://\w+:(?!local-dev-only|change-me)[^@"']{4,}@

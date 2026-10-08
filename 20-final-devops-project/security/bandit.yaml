@@ -1,0 +1,3 @@
+# bandit — Python SAST. Tests are excluded (assert statements are how pytest works: B101).
+exclude_dirs: ["tests", ".venv"]
+skips: []

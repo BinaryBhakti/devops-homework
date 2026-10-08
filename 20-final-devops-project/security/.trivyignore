@@ -1,0 +1,11 @@
+# Every entry needs: the ID, why it does not apply or cannot be fixed yet, and a review date.
+# An entry without all three is rejected in review.
+#
+# Accepted risks:
+
+# AWS-0132 — S3 backups bucket uses SSE-S3 (AES256), not a customer-managed KMS key.
+#   Why accepted: the LocalStack instance this project provisions against does not run KMS, and
+#   SSE-KMS on a bucket without KMS breaks every write (seen in Homework 17's S3 lab).
+#   Data is still encrypted at rest. Real AWS: switch to aws_kms_key + sse_algorithm "aws:kms".
+#   Review by: 2026-12-31
+AWS-0132
